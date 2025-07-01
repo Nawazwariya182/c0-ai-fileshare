@@ -35,26 +35,32 @@ export class ConnectionManager {
   }
 
   private initializeEndpoints() {
-    const baseEndpoints = [
-      // Production endpoints
-      "wss://signaling-server-1ckx.onrender.com",
-      "wss://p2p-signaling-backup.herokuapp.com",
-      "wss://p2p-relay.railway.app",
-      
+    const baseEndpoints: string[] = []
+
+    // Production endpoints - try multiple reliable services
+    if (process.env.NODE_ENV === "production") {
+      baseEndpoints.push(
+        "wss://signaling-server-1ckx.onrender.com",
+        "wss://p2p-signaling-backup.onrender.com",
+        "wss://websocket-relay.herokuapp.com",
+        "wss://p2p-bridge.railway.app",
+      )
+    } else {
       // Development endpoints
-      "ws://localhost:8080",
-      "ws://127.0.0.1:8080",
-      "ws://0.0.0.0:8080",
-    ]
+      baseEndpoints.push("ws://localhost:8080", "ws://127.0.0.1:8080", "ws://0.0.0.0:8080")
+    }
 
     // Add custom endpoint if provided
     if (process.env.NEXT_PUBLIC_WS_URL) {
       baseEndpoints.unshift(process.env.NEXT_PUBLIC_WS_URL)
     }
 
+    // Add public WebSocket test servers as last resort
+    baseEndpoints.push("wss://echo.websocket.org", "wss://ws.postman-echo.com/raw")
+
     this.endpoints = baseEndpoints.map((url, index) => ({
       url,
-      priority: index === 0 ? 10 : 5 - Math.floor(index / 2), // Higher priority for first few
+      priority: index === 0 ? 10 : Math.max(5 - Math.floor(index / 2), 1),
       lastSuccess: 0,
       failureCount: 0,
       avgResponseTime: 1000,
@@ -72,17 +78,20 @@ export class ConnectionManager {
 
   private async performHealthChecks() {
     console.log("🏥 Performing health checks on all endpoints...")
-    
+
     const healthPromises = this.endpoints.map(async (endpoint) => {
       try {
         const startTime = Date.now()
-        const response = await fetch(endpoint.url.replace('ws://', 'http://').replace('wss://', 'https://') + '/health', {
-          method: 'GET',
-          timeout: 3000,
-        } as any)
-        
+        const response = await fetch(
+          endpoint.url.replace("ws://", "http://").replace("wss://", "https://") + "/health",
+          {
+            method: "GET",
+            timeout: 3000,
+          } as any,
+        )
+
         const responseTime = Date.now() - startTime
-        
+
         if (response.ok) {
           endpoint.isHealthy = true
           endpoint.lastSuccess = Date.now()
@@ -109,83 +118,87 @@ export class ConnectionManager {
       if (a.isHealthy !== b.isHealthy) {
         return a.isHealthy ? -1 : 1
       }
-      
+
       // Then by priority
       if (a.priority !== b.priority) {
         return b.priority - a.priority
       }
-      
+
       // Then by failure count (fewer failures first)
       if (a.failureCount !== b.failureCount) {
         return a.failureCount - b.failureCount
       }
-      
+
       // Finally by response time
       return a.avgResponseTime - b.avgResponseTime
     })
   }
 
   public async getOptimalConnection(): Promise<WebSocket> {
-    // Try to reuse existing healthy connection
-    for (const [url, ws] of this.connectionPool.entries()) {
-      if (ws.readyState === WebSocket.OPEN) {
-        console.log(`♻️ Reusing existing connection to ${url}`)
-        return ws
-      } else {
-        this.connectionPool.delete(url)
-      }
-    }
+    console.log(`🔍 Attempting connection to ${this.endpoints.length} endpoints...`)
 
     // Sort endpoints by health before attempting connection
     this.sortEndpointsByHealth()
-    
-    const healthyEndpoints = this.endpoints.filter(e => e.isHealthy)
-    const endpointsToTry = healthyEndpoints.length > 0 ? healthyEndpoints : this.endpoints
 
-    console.log(`🔍 Attempting connection to ${endpointsToTry.length} endpoints...`)
+    // Try endpoints in order of preference
+    for (let i = 0; i < this.endpoints.length; i++) {
+      const endpoint = this.endpoints[i]
 
-    // Try multiple endpoints in parallel for faster connection
-    const connectionPromises = endpointsToTry.slice(0, 3).map(endpoint => 
-      this.attemptConnection(endpoint)
-    )
+      try {
+        console.log(`🔗 Trying endpoint ${i + 1}/${this.endpoints.length}: ${endpoint.url}`)
+        const ws = await this.attemptConnection(endpoint)
+        console.log(`✅ Successfully connected to ${endpoint.url}`)
+        return ws
+      } catch (error) {
+        console.log(`❌ Failed to connect to ${endpoint.url}:`, error)
+        endpoint.failureCount++
+        endpoint.isHealthy = false
 
-    try {
-      const ws = await Promise.any(connectionPromises)
-      console.log(`✅ Successfully connected to optimal endpoint`)
-      return ws
-    } catch (error) {
-      console.error(`❌ All connection attempts failed:`, error)
-      throw new Error("Failed to connect to any signaling server")
+        // Continue to next endpoint
+        continue
+      }
     }
+
+    // If all endpoints failed, throw error
+    throw new Error(
+      `Failed to connect to any of ${this.endpoints.length} signaling servers. Please check your internet connection.`,
+    )
   }
 
   private async attemptConnection(endpoint: ServerEndpoint): Promise<WebSocket> {
     return new Promise((resolve, reject) => {
-      console.log(`🔗 Attempting connection to ${endpoint.url}...`)
-      
       const startTime = Date.now()
-      const ws = new WebSocket(endpoint.url)
-      
+      let ws: WebSocket
+
+      try {
+        ws = new WebSocket(endpoint.url)
+      } catch (error) {
+        reject(new Error(`Failed to create WebSocket: ${error}`))
+        return
+      }
+
       const timeout = setTimeout(() => {
-        ws.close()
-        endpoint.failureCount++
-        endpoint.isHealthy = false
-        reject(new Error(`Connection timeout to ${endpoint.url}`))
+        if (ws.readyState === WebSocket.CONNECTING) {
+          ws.close()
+          endpoint.failureCount++
+          endpoint.isHealthy = false
+          reject(new Error(`Connection timeout to ${endpoint.url} after ${this.config.connectionTimeout}ms`))
+        }
       }, this.config.connectionTimeout)
 
       ws.onopen = () => {
         clearTimeout(timeout)
         const responseTime = Date.now() - startTime
-        
+
         endpoint.lastSuccess = Date.now()
         endpoint.avgResponseTime = (endpoint.avgResponseTime + responseTime) / 2
         endpoint.failureCount = Math.max(0, endpoint.failureCount - 1)
         endpoint.isHealthy = true
         this.currentEndpoint = endpoint
-        
+
         // Add to connection pool
         this.connectionPool.set(endpoint.url, ws)
-        
+
         console.log(`✅ Connected to ${endpoint.url} in ${responseTime}ms`)
         resolve(ws)
       }
@@ -194,13 +207,16 @@ export class ConnectionManager {
         clearTimeout(timeout)
         endpoint.failureCount++
         endpoint.isHealthy = false
-        console.log(`❌ Connection failed to ${endpoint.url}:`, error)
-        reject(error)
+        console.log(`❌ Connection error to ${endpoint.url}:`, error)
+        reject(new Error(`WebSocket error: ${error}`))
       }
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         clearTimeout(timeout)
         this.connectionPool.delete(endpoint.url)
+        if (event.code !== 1000) {
+          reject(new Error(`WebSocket closed unexpectedly: ${event.code} ${event.reason}`))
+        }
       }
     })
   }
@@ -208,13 +224,13 @@ export class ConnectionManager {
   public async reconnectWithBackoff(attempt: number): Promise<WebSocket> {
     const delay = Math.min(this.config.reconnectDelay * Math.pow(1.5, attempt), 10000)
     console.log(`🔄 Reconnection attempt ${attempt + 1} in ${delay}ms...`)
-    
-    await new Promise(resolve => setTimeout(resolve, delay))
+
+    await new Promise((resolve) => setTimeout(resolve, delay))
     return this.getOptimalConnection()
   }
 
   public markEndpointFailed(url: string) {
-    const endpoint = this.endpoints.find(e => e.url === url)
+    const endpoint = this.endpoints.find((e) => e.url === url)
     if (endpoint) {
       endpoint.failureCount++
       endpoint.isHealthy = false
@@ -225,16 +241,16 @@ export class ConnectionManager {
   public getConnectionStats() {
     return {
       totalEndpoints: this.endpoints.length,
-      healthyEndpoints: this.endpoints.filter(e => e.isHealthy).length,
+      healthyEndpoints: this.endpoints.filter((e) => e.isHealthy).length,
       currentEndpoint: this.currentEndpoint?.url,
       poolSize: this.connectionPool.size,
-      endpoints: this.endpoints.map(e => ({
+      endpoints: this.endpoints.map((e) => ({
         url: e.url,
         isHealthy: e.isHealthy,
         failureCount: e.failureCount,
         avgResponseTime: e.avgResponseTime,
         priority: e.priority,
-      }))
+      })),
     }
   }
 
@@ -242,7 +258,7 @@ export class ConnectionManager {
     if (this.healthCheckInterval) {
       clearInterval(this.healthCheckInterval)
     }
-    
+
     for (const ws of this.connectionPool.values()) {
       if (ws.readyState === WebSocket.OPEN) {
         ws.close()
@@ -255,7 +271,7 @@ export class ConnectionManager {
 export class FastHandshake {
   private static instance: FastHandshake
   private preConnections: Map<string, WebSocket> = new Map()
-  
+
   public static getInstance(): FastHandshake {
     if (!FastHandshake.instance) {
       FastHandshake.instance = new FastHandshake()
@@ -265,11 +281,11 @@ export class FastHandshake {
 
   public async preWarmConnections(urls: string[]) {
     console.log("🔥 Pre-warming connections...")
-    
+
     const preWarmPromises = urls.slice(0, 2).map(async (url) => {
       try {
         const ws = new WebSocket(url)
-        
+
         return new Promise<void>((resolve) => {
           const timeout = setTimeout(() => {
             ws.close()
