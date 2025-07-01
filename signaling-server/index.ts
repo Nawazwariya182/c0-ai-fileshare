@@ -705,8 +705,8 @@ class SignalingServer {
         concurrencyLimit: 10,
         serverMaxWindowBits: 15,
         clientMaxWindowBits: 15,
-        serverMaxNoContextTakeover: false,
-        clientMaxNoContextTakeover: false,
+        serverNoContextTakeover: false,
+        clientNoContextTakeover: false,
       },
       maxPayload: 100 * 1024 * 1024, // 100MB
       clientTracking: true,

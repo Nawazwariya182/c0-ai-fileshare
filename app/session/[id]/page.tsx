@@ -1627,7 +1627,23 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { useUser } from "@clerk/nextjs"
 import { useParams, useRouter } from "next/navigation"
-import { Upload, Download, Users, Wifi, WifiOff, FileText, AlertTriangle, CheckCircle, X, RefreshCw, Shield, Smartphone, Monitor, Scan, Files } from 'lucide-react'
+import {
+  Upload,
+  Download,
+  Users,
+  Wifi,
+  WifiOff,
+  FileText,
+  AlertTriangle,
+  CheckCircle,
+  X,
+  RefreshCw,
+  Shield,
+  Smartphone,
+  Monitor,
+  Scan,
+  Files,
+} from "lucide-react"
 
 // Import new components and utilities
 import { FilePreviewModal } from "@/components/file-preview-modal"
@@ -1807,7 +1823,7 @@ export default function SessionPage() {
     // FIXED: Proper WebSocket URLs for production
     const getWebSocketUrls = () => {
       const urls: string[] = []
-      
+
       // Primary URL from environment variable
       if (process.env.NEXT_PUBLIC_WS_URL) {
         urls.push(process.env.NEXT_PUBLIC_WS_URL)
@@ -1815,16 +1831,10 @@ export default function SessionPage() {
 
       // Production URLs
       if (process.env.NODE_ENV === "production") {
-        urls.push(
-          "wss://signaling-server-1ckx.onrender.com",
-          "ws://signaling-server-1ckx.onrender.com"
-        )
+        urls.push("wss://signaling-server-1ckx.onrender.com", "ws://signaling-server-1ckx.onrender.com")
       } else {
         // Development URLs
-        urls.push(
-          "ws://localhost:8080",
-          "ws://127.0.0.1:8080"
-        )
+        urls.push("ws://localhost:8080", "ws://127.0.0.1:8080")
       }
 
       return [...new Set(urls)] // Remove duplicates
@@ -1873,7 +1883,7 @@ export default function SessionPage() {
             reconnect: connectionAttempts > 0,
             timestamp: Date.now(),
           }
-          
+
           console.log("📤 Sending join message:", joinMessage)
           ws.send(JSON.stringify(joinMessage))
 
@@ -1914,12 +1924,11 @@ export default function SessionPage() {
         ws.onerror = (error) => {
           clearTimeout(connectionTimeout)
           console.error(`❌ WebSocket error on ${wsUrl}:`, error)
-          
+
           // Try next URL immediately
           currentUrlIndex++
           setTimeout(tryConnection, 500)
         }
-
       } catch (error) {
         console.error(`❌ Failed to create WebSocket for ${wsUrl}:`, error)
         currentUrlIndex++
@@ -2717,11 +2726,21 @@ export default function SessionPage() {
   }
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    console.log("📱 File input triggered, files:", e.target.files?.length)
     const files = Array.from(e.target.files || [])
+
     if (files.length > 0) {
+      console.log(
+        "📱 Selected files:",
+        files.map((f) => f.name),
+      )
       setPreviewFiles(files)
       setShowPreview(true)
+    } else {
+      console.log("📱 No files selected")
     }
+
+    // Reset the input value to allow selecting the same files again
     e.target.value = ""
   }
 
@@ -2768,6 +2787,17 @@ export default function SessionPage() {
     SessionManager.extendSession(sessionId)
   }
 
+  // Mobile-specific touch handlers - FIXED
+  const handleTouchStart = (e: React.TouchEvent) => {
+    // Don't prevent default - let normal touch behavior work
+    setDragOver(true)
+  }
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    // Don't prevent default - let normal touch behavior work
+    setDragOver(false)
+  }
+
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
     setDragOver(false)
@@ -2776,16 +2806,6 @@ export default function SessionPage() {
       setPreviewFiles(files)
       setShowPreview(true)
     }
-  }
-
-  const handleTouchStart = (e: React.TouchEvent) => {
-    e.preventDefault()
-    setDragOver(true)
-  }
-
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    e.preventDefault()
-    setDragOver(false)
   }
 
   const formatTimeRemaining = (ms: number): string => {
@@ -2847,7 +2867,7 @@ export default function SessionPage() {
               {isMobile ? <Smartphone className="w-3 h-3" /> : <Monitor className="w-3 h-3" />}
             </div>
           </div>
-          
+
           {/* Debug info for connection troubleshooting */}
           {process.env.NODE_ENV === "development" && (
             <div className="mt-2 text-xs text-gray-600">
@@ -2903,24 +2923,49 @@ export default function SessionPage() {
                   onDragLeave={() => setDragOver(false)}
                   onTouchStart={handleTouchStart}
                   onTouchEnd={handleTouchEnd}
+                  onClick={() => {
+                    // On mobile, clicking the zone should also trigger file selection
+                    if (isMobile && connectionStatus === "connected") {
+                      fileInputRef.current?.click()
+                    }
+                  }}
                 >
                   <Upload className="w-12 md:w-16 h-12 md:h-16 mx-auto mb-4" />
                   <p className="text-lg md:text-xl font-black mb-2">
                     {connectionStatus === "connected"
                       ? isMobile
-                        ? "TAP TO SELECT FILES"
+                        ? "TAP HERE TO SELECT FILES"
                         : "DROP FILES HERE"
                       : "WAITING FOR CONNECTION..."}
                   </p>
                   {!isMobile && <p className="font-bold mb-4">or</p>}
-                  <Button
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={connectionStatus !== "connected"}
-                    className="neubrutalism-button bg-blue-500 text-white hover:bg-white hover:text-blue-500 touch-target"
-                  >
-                    CHOOSE FILES
-                  </Button>
-                  <input ref={fileInputRef} type="file" multiple onChange={handleFileSelect} className="hidden" />
+
+                  {/* Mobile-friendly file input */}
+                  <div className="relative">
+                    <Button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        fileInputRef.current?.click()
+                      }}
+                      disabled={connectionStatus !== "connected"}
+                      className="neubrutalism-button bg-blue-500 text-white hover:bg-white hover:text-blue-500 touch-target"
+                      type="button"
+                    >
+                      CHOOSE FILES
+                    </Button>
+
+                    {/* Enhanced mobile file input */}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      onChange={handleFileSelect}
+                      className="hidden"
+                      accept="*/*"
+                      capture={undefined}
+                    />
+                  </div>
+
                   <p className="text-xs md:text-sm font-bold mt-4 text-gray-600">
                     Max 100MB per file • Multi-file support • AI Scanned • SHA-256 verified
                   </p>
@@ -2928,6 +2973,27 @@ export default function SessionPage() {
               </CardContent>
             </Card>
           </div>
+
+          {/* Mobile-specific file selection alternative */}
+          {isMobile && connectionStatus === "connected" && (
+            <div className="mt-4 p-4 bg-blue-100 border-2 border-blue-400 rounded">
+              <p className="text-sm font-bold mb-2">📱 Mobile File Selection:</p>
+              <label
+                htmlFor="mobile-file-input"
+                className="block w-full p-3 bg-blue-500 text-white font-bold text-center border-2 border-black cursor-pointer hover:bg-blue-600"
+              >
+                📁 SELECT FILES FROM DEVICE
+              </label>
+              <input
+                id="mobile-file-input"
+                type="file"
+                multiple
+                onChange={handleFileSelect}
+                className="hidden"
+                accept="*/*"
+              />
+            </div>
+          )}
 
           {/* Row 2: Chat (2/3) + Connection Status (1/3) */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
@@ -2959,11 +3025,7 @@ export default function SessionPage() {
                         <div className="animate-spin w-6 md:w-8 h-6 md:h-8 border-4 border-black border-t-transparent rounded-full mx-auto mb-4 mobile-spinner"></div>
                         <p className="font-black text-base md:text-lg">CONNECTING TO SERVER...</p>
                         <p className="font-bold text-sm md:text-base">Establishing signaling connection</p>
-                        {currentWsUrl && (
-                          <p className="text-xs mt-2 text-gray-600 break-all">
-                            Trying: {currentWsUrl}
-                          </p>
-                        )}
+                        {currentWsUrl && <p className="text-xs mt-2 text-gray-600 break-all">Trying: {currentWsUrl}</p>}
                       </div>
                     )}
                     {wsStatus === "connected" && userCount < 2 && (
@@ -3098,7 +3160,7 @@ export default function SessionPage() {
                             className={`px-2 py-1 text-xs font-bold border-2 border-black flex-shrink-0 ${
                               transfer.status === "completed"
                                 ? "bg-green-300"
-                                : transfer.status ===  "transferring"
+                                : transfer.status === "transferring"
                                   ? "bg-yellow-300"
                                   : transfer.status === "scanning"
                                     ? "bg-blue-300"

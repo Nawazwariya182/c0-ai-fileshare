@@ -72,7 +72,7 @@ export default function JoinSessionPage() {
               <Button
                 onClick={validateAndJoin}
                 disabled={sessionCode.length !== 6}
-                className="w-full neubrutalism-button bg-green-500 text-white text-lg md:text-xl py-3 md:py-4 disabled:opacity-50 disabled:cursor-not-allowed touch-target"
+                className="w-full neubrutalism-button bg-green-500 text-white hover:bg-white hover:text-green-500 text-lg md:text-xl py-3 md:py-4 disabled:opacity-50 disabled:cursor-not-allowed touch-target"
               >
                 <LogIn className="w-4 md:w-5 h-4 md:h-5 mr-2" />
                 JOIN SESSION
