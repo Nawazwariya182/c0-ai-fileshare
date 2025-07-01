@@ -9,7 +9,7 @@ export default function Page() {
         {/* Header */}
         <div className="mb-6 sm:mb-8">
           <h1 className="text-2xl sm:text-4xl md:text-6xl font-black text-black mb-2 tracking-tight break-words">
-            CONTENTIFY
+            c0 - fileshare
           </h1>
           <div className="w-16 sm:w-24 h-1 sm:h-2 bg-black"></div>
         </div>
@@ -21,21 +21,21 @@ export default function Page() {
               <h2 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-black text-black mb-3 sm:mb-4 leading-tight">
                 WELCOME BACK!
               </h2>
-              <p className="text-sm sm:text-base lg:text-lg font-bold text-black mb-4 sm:mb-6">
-                Ready to create amazing content? Sign in to access your dashboard and continue building.
-              </p>
-              <div className="space-y-2 sm:space-y-3">
+                <p className="text-sm sm:text-base lg:text-lg font-bold text-black mb-4 sm:mb-6">
+                Ready to share your files? Sign in to access your dashboard and start sharing securely.
+                </p>
+                <div className="space-y-2 sm:space-y-3">
                 <div className="flex items-center space-x-2 sm:space-x-3">
                   <div className="w-3 h-3 sm:w-4 sm:h-4 bg-black flex-shrink-0"></div>
-                  <span className="font-bold text-black text-sm sm:text-base">Access your projects</span>
+                  <span className="font-bold text-black text-sm sm:text-base">Upload and share files</span>
                 </div>
                 <div className="flex items-center space-x-2 sm:space-x-3">
                   <div className="w-3 h-3 sm:w-4 sm:h-4 bg-black flex-shrink-0"></div>
-                  <span className="font-bold text-black text-sm sm:text-base">Manage your content</span>
+                  <span className="font-bold text-black text-sm sm:text-base">Manage your downloads</span>
                 </div>
                 <div className="flex items-center space-x-2 sm:space-x-3">
                   <div className="w-3 h-3 sm:w-4 sm:h-4 bg-black flex-shrink-0"></div>
-                  <span className="font-bold text-black text-sm sm:text-base">Track your progress</span>
+                  <span className="font-bold text-black text-sm sm:text-base">Track sharing activity</span>
                 </div>
               </div>
             </div>
@@ -43,13 +43,13 @@ export default function Page() {
             {/* Decorative Elements - Hidden on mobile, shown on larger screens */}
             <div className="hidden sm:block lg:block space-y-3 sm:space-y-4">
               <div className="bg-pink-400 border-2 sm:border-4 border-black p-3 sm:p-4 shadow-[3px_3px_0px_0px_#000000] sm:shadow-[6px_6px_0px_0px_#000000]">
-                <div className="text-lg sm:text-xl font-black text-black">CREATE</div>
+                <div className="text-lg sm:text-xl font-black text-black">SHARE</div>
               </div>
               <div className="bg-cyan-400 border-2 sm:border-4 border-black p-3 sm:p-4 shadow-[3px_3px_0px_0px_#000000] sm:shadow-[6px_6px_0px_0px_#000000] ml-4 sm:ml-8">
-                <div className="text-lg sm:text-xl font-black text-black">MANAGE</div>
+                <div className="text-lg sm:text-xl font-black text-black">RECEIVE</div>
               </div>
               <div className="bg-green-400 border-2 sm:border-4 border-black p-3 sm:p-4 shadow-[3px_3px_0px_0px_#000000] sm:shadow-[6px_6px_0px_0px_#000000] ml-2 sm:ml-4">
-                <div className="text-lg sm:text-xl font-black text-black">PUBLISH</div>
+                <div className="text-lg sm:text-xl font-black text-black">SEND</div>
               </div>
             </div>
           </div>
@@ -88,9 +88,9 @@ export default function Page() {
             {/* Bottom Decorative Box */}
             <div className="bg-pink-400 border-2 sm:border-4 border-black p-4 sm:p-6 shadow-[4px_4px_0px_0px_#000000] sm:shadow-[8px_8px_0px_0px_#000000]">
               <div className="text-center">
-                <div className="text-base sm:text-lg font-black text-black mb-1 sm:mb-2">NEW TO CONTENTIFY?</div>
+                <div className="text-base sm:text-lg font-black text-black mb-1 sm:mb-2">NEW TO c0?</div>
                 <div className="text-xs sm:text-sm font-bold text-black">
-                  Join thousands of creators already using our platform!
+                  Join thousands of users already using our platform!
                 </div>
               </div>
             </div>
@@ -104,8 +104,8 @@ export default function Page() {
             <div className="text-xs sm:text-sm font-bold text-black">USERS</div>
           </div>
           <div className="bg-green-400 border-2 sm:border-4 border-black p-2 sm:p-4 shadow-[2px_2px_0px_0px_#000000] sm:shadow-[4px_4px_0px_0px_#000000] text-center">
-            <div className="text-lg sm:text-2xl font-black text-black">10K+</div>
-            <div className="text-xs sm:text-sm font-bold text-black">PROJECTS</div>
+            <div className="text-lg sm:text-2xl font-black text-black">1+GB</div>
+            <div className="text-xs sm:text-sm font-bold text-black">FILES</div>
           </div>
           <div className="bg-pink-400 border-2 sm:border-4 border-black p-2 sm:p-4 shadow-[2px_2px_0px_0px_#000000] sm:shadow-[4px_4px_0px_0px_#000000] text-center">
             <div className="text-lg sm:text-2xl font-black text-black">24/7</div>
@@ -121,13 +121,13 @@ export default function Page() {
         <div className="block sm:hidden mt-6 space-y-3">
           <div className="flex space-x-2">
             <div className="bg-pink-400 border-2 border-black p-2 shadow-[2px_2px_0px_0px_#000000] flex-1 text-center">
-              <div className="text-sm font-black text-black">CREATE</div>
+              <div className="text-sm font-black text-black">SHARE</div>
             </div>
             <div className="bg-cyan-400 border-2 border-black p-2 shadow-[2px_2px_0px_0px_#000000] flex-1 text-center">
-              <div className="text-sm font-black text-black">MANAGE</div>
+              <div className="text-sm font-black text-black">RECEIVE</div>
             </div>
             <div className="bg-green-400 border-2 border-black p-2 shadow-[2px_2px_0px_0px_#000000] flex-1 text-center">
-              <div className="text-sm font-black text-black">PUBLISH</div>
+              <div className="text-sm font-black text-black">SEND</div>
             </div>
           </div>
         </div>
