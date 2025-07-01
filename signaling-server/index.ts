@@ -637,12 +637,13 @@ class SignalingServer {
 
     this.server = createServer()
 
-    // FIXED: Enhanced CORS and request handling
+    // OPTIMIZED: Enhanced CORS and request handling
     this.server.on("request", (req, res) => {
       // Set CORS headers for all requests
       const origin = req.headers.origin
       const allowedOrigins = [
         "https://p2p-file-share-fix.vercel.app",
+        "https://c0-ai.live",
         "https://vercel.app",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
@@ -676,7 +677,7 @@ class SignalingServer {
             sessions: this.sessions.size,
             connections: this.userSessions.size,
             uptime: process.uptime(),
-            version: "1.0.0",
+            version: "2.0.0",
           }),
         )
         return
@@ -693,7 +694,7 @@ class SignalingServer {
       res.end(JSON.stringify({ error: "Not Found" }))
     })
 
-    // FIXED: Enhanced WebSocket server configuration
+    // OPTIMIZED: Enhanced WebSocket server configuration
     this.wss = new WebSocketServer({
       server: this.server,
       perMessageDeflate: {
@@ -715,12 +716,12 @@ class SignalingServer {
         return protocols[0] || false
       },
       verifyClient: (info) => {
-        // Enhanced client verification
+        // OPTIMIZED: Less strict client verification for better connectivity
         const origin = info.origin
         console.log(`🔍 Verifying WebSocket client from origin: ${origin}`)
 
         // Allow connections from Vercel and localhost
-        if (!origin) return true // Allow connections without origin (like from Postman)
+        if (!origin) return true // Allow connections without origin
 
         const allowedOrigins = [
           "https://p2p-file-share-fix.vercel.app",
@@ -731,7 +732,8 @@ class SignalingServer {
           "https://localhost:3000",
         ]
 
-        const isAllowed = allowedOrigins.includes(origin) || origin.includes(".vercel.app")
+        const isAllowed =
+          allowedOrigins.includes(origin) || origin.includes(".vercel.app") || origin.includes("localhost")
         console.log(`${isAllowed ? "✅" : "❌"} Origin ${origin} ${isAllowed ? "allowed" : "blocked"}`)
 
         return isAllowed
@@ -739,12 +741,13 @@ class SignalingServer {
     })
 
     this.wss.on("connection", this.handleConnection.bind(this))
+
     this.wss.on("error", (error) => {
       console.error("❌ WebSocket Server error:", error)
     })
 
-    // Clean up expired sessions every minute
-    setInterval(this.cleanupSessions.bind(this), 60000)
+    // OPTIMIZED: Less aggressive session cleanup
+    setInterval(this.cleanupSessions.bind(this), 120000) // Every 2 minutes instead of 1
 
     // Start server with proper error handling
     this.server.listen(port, "0.0.0.0", () => {
@@ -777,7 +780,7 @@ class SignalingServer {
 
     // Log server info
     console.log(`🔧 WebSocket Server Configuration:`)
-    console.log(`   - Max Payload: ${100}MB`)
+    console.log(`   - Max Payload: 1GB`)
     console.log(`   - Compression: Enabled`)
     console.log(`   - Client Tracking: Enabled`)
     console.log(`   - CORS: Configured for Vercel`)
@@ -810,6 +813,7 @@ class SignalingServer {
   private handleConnection(ws: WebSocket, req: any) {
     const clientIP = req.socket.remoteAddress
     const userAgent = req.headers["user-agent"]
+
     console.log(`🔗 New client connected from ${clientIP}`)
     console.log(`   User-Agent: ${userAgent}`)
 
@@ -818,7 +822,7 @@ class SignalingServer {
       type: "connected",
       message: "Connected to signaling server",
       timestamp: new Date().toISOString(),
-      serverVersion: "1.0.0",
+      serverVersion: "2.0.0",
       features: ["file-transfer", "chat", "p2p"],
     })
 
@@ -851,16 +855,16 @@ class SignalingServer {
       console.log(`🏓 Pong received from ${clientIP}`)
     })
 
-    // Send ping every 30 seconds to keep connection alive
+    // OPTIMIZED: More frequent ping for better connection monitoring
     const pingInterval = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.ping("ping")
       } else {
         clearInterval(pingInterval)
       }
-    }, 30000)
+    }, 15000) // Every 15 seconds instead of 30
 
-    // Connection timeout handling
+    // OPTIMIZED: Longer connection timeout
     const connectionTimeout = setTimeout(
       () => {
         if (ws.readyState === WebSocket.OPEN) {
@@ -868,8 +872,8 @@ class SignalingServer {
           ws.close(1008, "Connection timeout")
         }
       },
-      5 * 60 * 1000,
-    ) // 5 minutes
+      15 * 60 * 1000, // 15 minutes instead of 5
+    )
 
     ws.on("close", () => {
       clearInterval(pingInterval)
@@ -1010,7 +1014,7 @@ class SignalingServer {
     if (session.users.size === 2) {
       console.log(`🚀 Session ${sessionId} is full, initiating P2P connection`)
 
-      // Small delay to ensure both clients are ready
+      // OPTIMIZED: Reduced delay for faster connection
       setTimeout(() => {
         this.broadcastToSession(
           sessionId,
@@ -1022,7 +1026,7 @@ class SignalingServer {
           },
           ws,
         )
-      }, 1000)
+      }, 500) // Reduced from 1000ms
     } else {
       // Just notify about the join
       this.broadcastToSession(
@@ -1115,10 +1119,10 @@ class SignalingServer {
       serverProcessed: new Date().toISOString(),
     }
 
-    // Validate message size
+    // OPTIMIZED: Increased message size limit
     const messageSize = JSON.stringify(relayMessage).length
-    if (messageSize > 1024 * 1024) {
-      // 1MB limit for signaling messages
+    if (messageSize > 5 * 1024 * 1024) {
+      // 5MB limit instead of 1MB
       this.sendError(ws, "Message too large")
       return
     }
@@ -1136,6 +1140,7 @@ class SignalingServer {
 
     // Find and handle user disconnection
     let disconnectedUserId: string | undefined
+
     for (const [userId, userData] of session.users.entries()) {
       if (userData.ws === ws) {
         disconnectedUserId = userId
@@ -1158,13 +1163,13 @@ class SignalingServer {
         timestamp: Date.now(),
       })
 
-      // Schedule cleanup of disconnected user after 2 minutes
+      // OPTIMIZED: Longer grace period for reconnection
       setTimeout(() => {
         const currentSession = this.sessions.get(sessionId)
         if (currentSession) {
           const user = currentSession.users.get(disconnectedUserId!)
-          if (user && Date.now() - user.lastSeen.getTime() > 120000) {
-            // 2 minutes
+          if (user && Date.now() - user.lastSeen.getTime() > 300000) {
+            // 5 minutes instead of 2
             currentSession.users.delete(disconnectedUserId!)
             console.log(`🗑️ Removed inactive user ${disconnectedUserId} from session ${sessionId}`)
 
@@ -1184,7 +1189,7 @@ class SignalingServer {
             }
           }
         }
-      }, 120000) // 2 minutes
+      }, 300000) // 5 minutes instead of 2
     }
   }
 
@@ -1210,9 +1215,11 @@ class SignalingServer {
     if (sentCount > 0) {
       console.log(`📡 Broadcasted ${message.type} to ${sentCount} users in session ${sessionId}`)
     }
+
     if (failedCount > 0) {
       console.log(`⚠️ Failed to send to ${failedCount} users in session ${sessionId}`)
     }
+
     if (sentCount === 0 && session.users.size > 1) {
       console.log(`⚠️ No active users to broadcast ${message.type} to in session ${sessionId}`)
     }
@@ -1238,22 +1245,23 @@ class SignalingServer {
     })
   }
 
+  // OPTIMIZED: Less aggressive session cleanup
   private cleanupSessions() {
     const now = new Date()
     const expiredSessions: string[] = []
 
     this.sessions.forEach((session, sessionId) => {
-      // Remove sessions inactive for more than 10 minutes
+      // Remove sessions inactive for more than 30 minutes instead of 10
       const inactiveTime = now.getTime() - session.lastActivity.getTime()
-      if (inactiveTime > 10 * 60 * 1000) {
+      if (inactiveTime > 30 * 60 * 1000) {
         expiredSessions.push(sessionId)
       } else {
         // Clean up inactive users within active sessions
         const inactiveUsers: string[] = []
         session.users.forEach((userData, userId) => {
           const userInactiveTime = now.getTime() - userData.lastSeen.getTime()
-          if (userInactiveTime > 5 * 60 * 1000) {
-            // 5 minutes
+          if (userInactiveTime > 15 * 60 * 1000) {
+            // 15 minutes instead of 5
             inactiveUsers.push(userId)
           }
         })
@@ -1332,6 +1340,7 @@ function checkPort(port: number): Promise<boolean> {
 // Start the server with enhanced error handling
 async function startServer() {
   const port = process.env.PORT || 8080
+
   console.log(`🔍 Checking if port ${port} is available...`)
 
   try {
