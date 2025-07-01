@@ -614,6 +614,7 @@ interface UserData {
   joinedAt: Date
   lastSeen: Date
   isInitiator: boolean
+  lastHeartbeat: Date
 }
 
 interface Session {
@@ -629,17 +630,17 @@ class SignalingServer {
   private sessions: Map<string, Session> = new Map()
   private userSessions: Map<WebSocket, string> = new Map()
   private server: any
+  private heartbeatInterval: NodeJS.Timeout | null = null
 
   constructor(port = process.env.PORT || 8080) {
-    console.log("🚀 Initializing P2P Signaling Server...")
+    console.log("🚀 Initializing Enhanced P2P Signaling Server...")
     console.log(`🔧 Environment: ${process.env.NODE_ENV || "development"}`)
     console.log(`🌐 Port: ${port}`)
 
     this.server = createServer()
 
-    // FIXED: Enhanced CORS and request handling
+    // Enhanced CORS and request handling
     this.server.on("request", (req, res) => {
-      // Set CORS headers for all requests
       const origin = req.headers.origin
       const allowedOrigins = [
         "https://p2p-file-share-fix.vercel.app",
@@ -649,7 +650,6 @@ class SignalingServer {
         "https://localhost:3000",
       ]
 
-      // Allow all Vercel preview deployments
       if (origin && (allowedOrigins.includes(origin) || origin.includes(".vercel.app"))) {
         res.setHeader("Access-Control-Allow-Origin", origin)
       } else if (!origin) {
@@ -666,7 +666,6 @@ class SignalingServer {
         return
       }
 
-      // Health check endpoint
       if (req.url === "/health" || req.url === "/") {
         res.writeHead(200, { "Content-Type": "application/json" })
         res.end(
@@ -676,13 +675,13 @@ class SignalingServer {
             sessions: this.sessions.size,
             connections: this.userSessions.size,
             uptime: process.uptime(),
-            version: "1.0.0",
+            version: "2.0.0-enhanced",
+            features: ["enhanced-reliability", "auto-reconnect", "heartbeat-monitoring"],
           }),
         )
         return
       }
 
-      // Stats endpoint for debugging
       if (req.url === "/stats") {
         res.writeHead(200, { "Content-Type": "application/json" })
         res.end(JSON.stringify(this.getStats()))
@@ -693,7 +692,7 @@ class SignalingServer {
       res.end(JSON.stringify({ error: "Not Found" }))
     })
 
-    // FIXED: Enhanced WebSocket server configuration
+    // Enhanced WebSocket server configuration
     this.wss = new WebSocketServer({
       server: this.server,
       perMessageDeflate: {
@@ -715,12 +714,10 @@ class SignalingServer {
         return protocols[0] || false
       },
       verifyClient: (info) => {
-        // Enhanced client verification
         const origin = info.origin
         console.log(`🔍 Verifying WebSocket client from origin: ${origin}`)
 
-        // Allow connections from Vercel and localhost
-        if (!origin) return true // Allow connections without origin (like from Postman)
+        if (!origin) return true
 
         const allowedOrigins = [
           "https://p2p-file-share-fix.vercel.app",
@@ -741,17 +738,18 @@ class SignalingServer {
       console.error("❌ WebSocket Server error:", error)
     })
 
-    // Clean up expired sessions every minute
-    setInterval(this.cleanupSessions.bind(this), 60000)
+    // Enhanced session cleanup and heartbeat monitoring
+    this.startHeartbeatMonitoring()
+    setInterval(this.cleanupSessions.bind(this), 30000) // Every 30 seconds
 
     // Start server with proper error handling
     this.server.listen(port, "0.0.0.0", () => {
-      console.log(`✅ Signaling server successfully started!`)
+      console.log(`✅ Enhanced signaling server successfully started!`)
       console.log(`📡 HTTP server running on http://0.0.0.0:${port}`)
       console.log(`🔗 WebSocket server running on ws://0.0.0.0:${port}`)
       console.log(`🌍 Health check: http://0.0.0.0:${port}/health`)
       console.log(`📊 Stats endpoint: http://0.0.0.0:${port}/stats`)
-      console.log(`🔗 Ready to accept connections`)
+      console.log(`🔗 Ready to accept enhanced connections`)
       console.log("=".repeat(50))
     })
 
@@ -774,15 +772,47 @@ class SignalingServer {
     process.on("SIGINT", this.shutdown.bind(this))
 
     // Log server info
-    console.log(`🔧 WebSocket Server Configuration:`)
-    console.log(`   - Max Payload: ${100}MB`)
+    console.log(`🔧 Enhanced WebSocket Server Configuration:`)
+    console.log(`   - Max Payload: ${1024}MB`)
     console.log(`   - Compression: Enabled`)
     console.log(`   - Client Tracking: Enabled`)
     console.log(`   - CORS: Configured for Vercel`)
+    console.log(`   - Heartbeat Monitoring: Enabled`)
+    console.log(`   - Auto-reconnect Support: Enabled`)
+  }
+
+  private startHeartbeatMonitoring() {
+    this.heartbeatInterval = setInterval(() => {
+      const now = new Date()
+      this.sessions.forEach((session, sessionId) => {
+        session.users.forEach((userData, userId) => {
+          const timeSinceLastHeartbeat = now.getTime() - userData.lastHeartbeat.getTime()
+
+          // If no heartbeat for 45 seconds, mark as potentially disconnected
+          if (timeSinceLastHeartbeat > 45000 && userData.ws.readyState === WebSocket.OPEN) {
+            console.log(`⚠️ User ${userId} in session ${sessionId} missed heartbeat, sending ping`)
+            this.send(userData.ws, {
+              type: "ping-request",
+              timestamp: now.getTime(),
+            })
+          }
+
+          // If no heartbeat for 90 seconds, consider disconnected
+          if (timeSinceLastHeartbeat > 90000) {
+            console.log(`💔 User ${userId} in session ${sessionId} heartbeat timeout, closing connection`)
+            userData.ws.close(1008, "Heartbeat timeout")
+          }
+        })
+      })
+    }, 15000) // Check every 15 seconds
   }
 
   private shutdown() {
-    console.log("\n🛑 Shutting down signaling server...")
+    console.log("\n🛑 Shutting down enhanced signaling server...")
+
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval)
+    }
 
     // Close all WebSocket connections gracefully
     this.wss.clients.forEach((ws) => {
@@ -794,13 +824,13 @@ class SignalingServer {
 
     // Close the server
     this.server.close(() => {
-      console.log("✅ Server shut down gracefully")
+      console.log("✅ Enhanced server shut down gracefully")
       process.exit(0)
     })
 
     // Force exit after 10 seconds
     setTimeout(() => {
-      console.log("⚠️ Force closing server")
+      console.log("⚠️ Force closing enhanced server")
       process.exit(1)
     }, 10000)
   }
@@ -808,19 +838,19 @@ class SignalingServer {
   private handleConnection(ws: WebSocket, req: any) {
     const clientIP = req.socket.remoteAddress
     const userAgent = req.headers["user-agent"]
-    console.log(`🔗 New client connected from ${clientIP}`)
+    console.log(`🔗 New enhanced client connected from ${clientIP}`)
     console.log(`   User-Agent: ${userAgent}`)
 
-    // Send immediate confirmation with server info
+    // Send immediate confirmation with enhanced server info
     this.send(ws, {
       type: "connected",
-      message: "Connected to signaling server",
+      message: "Connected to enhanced signaling server",
       timestamp: new Date().toISOString(),
-      serverVersion: "1.0.0",
-      features: ["file-transfer", "chat", "p2p"],
+      serverVersion: "2.0.0-enhanced",
+      features: ["enhanced-reliability", "auto-reconnect", "heartbeat-monitoring", "file-transfer", "chat", "p2p"],
     })
 
-    // Set up connection handlers
+    // Set up enhanced connection handlers
     ws.on("message", (data) => {
       try {
         const message = JSON.parse(data.toString())
@@ -835,39 +865,51 @@ class SignalingServer {
     })
 
     ws.on("close", (code, reason) => {
-      console.log(`🔌 Client disconnected: ${code} ${reason} (${clientIP})`)
+      console.log(`🔌 Enhanced client disconnected: ${code} ${reason} (${clientIP})`)
       this.handleDisconnection(ws)
     })
 
     ws.on("error", (error) => {
-      console.error(`❌ WebSocket error from ${clientIP}:`, error)
+      console.error(`❌ Enhanced WebSocket error from ${clientIP}:`, error)
       this.handleDisconnection(ws)
     })
 
     // Enhanced ping/pong handling
     ws.on("pong", (data) => {
-      console.log(`🏓 Pong received from ${clientIP}`)
+      console.log(`🏓 Enhanced pong received from ${clientIP}`)
+      // Update heartbeat timestamp
+      const sessionId = this.userSessions.get(ws)
+      if (sessionId) {
+        const session = this.sessions.get(sessionId)
+        if (session) {
+          session.users.forEach((userData) => {
+            if (userData.ws === ws) {
+              userData.lastHeartbeat = new Date()
+            }
+          })
+        }
+      }
     })
 
-    // Send ping every 30 seconds to keep connection alive
+    // Enhanced ping every 20 seconds to keep connection alive
     const pingInterval = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
-        ws.ping("ping")
+        ws.ping("enhanced-ping")
       } else {
         clearInterval(pingInterval)
       }
-    }, 30000)
+    }, 20000)
 
-    // Connection timeout handling
+    // Enhanced connection timeout handling
     const connectionTimeout = setTimeout(
       () => {
         if (ws.readyState === WebSocket.OPEN) {
-          console.log(`⏰ Connection timeout for ${clientIP}`)
-          ws.close(1008, "Connection timeout")
+          console.log(`⏰ Enhanced connection timeout for ${clientIP}`)
+          ws.close(1008, "Enhanced connection timeout")
         }
       },
-      5 * 60 * 1000,
-    ) // 5 minutes
+      10 * 60 * 1000,
+    ) // 10 minutes
 
     ws.on("close", () => {
       clearInterval(pingInterval)
@@ -897,6 +939,9 @@ class SignalingServer {
       case "ping":
         this.handlePing(ws, sessionId, userId)
         break
+      case "ping-response":
+        this.handlePingResponse(ws, sessionId, userId)
+        break
       case "retry-connection":
         this.handleRetryConnection(ws, sessionId, userId)
         break
@@ -917,7 +962,7 @@ class SignalingServer {
       return
     }
 
-    console.log(`👤 User ${userId} ${isReconnect ? "reconnecting to" : "joining"} session ${sessionId}`)
+    console.log(`👤 User ${userId} ${isReconnect ? "reconnecting to" : "joining"} enhanced session ${sessionId}`)
 
     // Get or create session
     let session = this.sessions.get(sessionId)
@@ -930,16 +975,17 @@ class SignalingServer {
         connectionAttempts: 0,
       }
       this.sessions.set(sessionId, session)
-      console.log(`🆕 Created session: ${sessionId}`)
+      console.log(`🆕 Created enhanced session: ${sessionId}`)
     }
 
     // Check if user is already in session (reconnection)
     const existingUser = session.users.get(userId)
     if (existingUser) {
-      console.log(`🔄 User ${userId} reconnecting to session ${sessionId}`)
+      console.log(`🔄 User ${userId} reconnecting to enhanced session ${sessionId}`)
       // Update the WebSocket connection
       existingUser.ws = ws
       existingUser.lastSeen = new Date()
+      existingUser.lastHeartbeat = new Date()
       this.userSessions.set(ws, sessionId)
       session.lastActivity = new Date()
 
@@ -951,6 +997,7 @@ class SignalingServer {
         userId,
         isInitiator: existingUser.isInitiator,
         reconnected: true,
+        enhanced: true,
       })
 
       // Notify other users about reconnection
@@ -960,6 +1007,7 @@ class SignalingServer {
           type: "user-reconnected",
           userId,
           userCount: session.users.size,
+          enhanced: true,
         },
         ws,
       )
@@ -969,7 +1017,7 @@ class SignalingServer {
 
     // Check if session is full (max 2 users for P2P)
     if (session.users.size >= 2) {
-      console.log(`❌ Session ${sessionId} is full (${session.users.size}/2 users)`)
+      console.log(`❌ Enhanced session ${sessionId} is full (${session.users.size}/2 users)`)
       this.sendError(ws, "Session is full (maximum 2 users)")
       return
     }
@@ -983,6 +1031,7 @@ class SignalingServer {
       userId,
       joinedAt: new Date(),
       lastSeen: new Date(),
+      lastHeartbeat: new Date(),
       isInitiator,
     }
 
@@ -991,7 +1040,7 @@ class SignalingServer {
     session.lastActivity = new Date()
 
     console.log(
-      `✅ User ${userId} joined session ${sessionId} (${session.users.size}/2 users) ${isInitiator ? "[INITIATOR]" : "[RECEIVER]"}`,
+      `✅ User ${userId} joined enhanced session ${sessionId} (${session.users.size}/2 users) ${isInitiator ? "[INITIATOR]" : "[RECEIVER]"}`,
     )
 
     // Send confirmation to the joining user
@@ -1002,13 +1051,14 @@ class SignalingServer {
       userId,
       isInitiator,
       sessionCreated: session.createdAt.toISOString(),
+      enhanced: true,
     })
 
     // If this is the second user, notify both users to start connection
     if (session.users.size === 2) {
-      console.log(`🚀 Session ${sessionId} is full, initiating P2P connection`)
+      console.log(`🚀 Enhanced session ${sessionId} is full, initiating P2P connection`)
 
-      // Small delay to ensure both clients are ready
+      // Increased delay to ensure both clients are ready for enhanced connection
       setTimeout(() => {
         this.broadcastToSession(
           sessionId,
@@ -1017,10 +1067,11 @@ class SignalingServer {
             userId,
             userCount: session.users.size,
             readyForConnection: true,
+            enhanced: true,
           },
           ws,
         )
-      }, 1000)
+      }, 2000) // Increased to 2 seconds
     } else {
       // Just notify about the join
       this.broadcastToSession(
@@ -1029,13 +1080,14 @@ class SignalingServer {
           type: "user-joined",
           userId,
           userCount: session.users.size,
+          enhanced: true,
         },
         ws,
       )
     }
 
     // Log session state
-    console.log(`📊 Session ${sessionId} users:`, Array.from(session.users.keys()))
+    console.log(`📊 Enhanced session ${sessionId} users:`, Array.from(session.users.keys()))
   }
 
   private handlePing(ws: WebSocket, sessionId: string, userId: string) {
@@ -1044,6 +1096,7 @@ class SignalingServer {
       const user = session.users.get(userId)
       if (user) {
         user.lastSeen = new Date()
+        user.lastHeartbeat = new Date()
         session.lastActivity = new Date()
       }
     }
@@ -1052,11 +1105,23 @@ class SignalingServer {
       type: "pong",
       timestamp: Date.now(),
       serverTime: new Date().toISOString(),
+      enhanced: true,
     })
   }
 
+  private handlePingResponse(ws: WebSocket, sessionId: string, userId: string) {
+    const session = this.sessions.get(sessionId)
+    if (session && userId) {
+      const user = session.users.get(userId)
+      if (user) {
+        user.lastHeartbeat = new Date()
+        session.lastActivity = new Date()
+      }
+    }
+  }
+
   private handleRetryConnection(ws: WebSocket, sessionId: string, userId: string) {
-    console.log(`🔄 Retry connection requested by ${userId} in session ${sessionId}`)
+    console.log(`🔄 Enhanced retry connection requested by ${userId} in session ${sessionId}`)
 
     const session = this.sessions.get(sessionId)
     if (!session) {
@@ -1073,6 +1138,7 @@ class SignalingServer {
       userId,
       attempt: session.connectionAttempts,
       timestamp: Date.now(),
+      enhanced: true,
     })
   }
 
@@ -1092,17 +1158,18 @@ class SignalingServer {
     // Update last activity
     session.lastActivity = new Date()
 
-    // Update user's last seen
+    // Update user's last seen and heartbeat
     const userId = Array.from(session.users.entries()).find(([_, userData]) => userData.ws === ws)?.[0]
     if (userId) {
       const user = session.users.get(userId)
       if (user) {
         user.lastSeen = new Date()
+        user.lastHeartbeat = new Date()
       }
     }
 
     console.log(
-      `🔄 Relaying ${message.type} from ${userId} in session ${sessionId} to ${session.users.size - 1} other users`,
+      `🔄 Relaying enhanced ${message.type} from ${userId} in session ${sessionId} to ${session.users.size - 1} other users`,
     )
 
     // Add sender info and validation to message
@@ -1111,6 +1178,7 @@ class SignalingServer {
       senderId: userId,
       timestamp: Date.now(),
       serverProcessed: new Date().toISOString(),
+      enhanced: true,
     }
 
     // Validate message size
@@ -1145,7 +1213,7 @@ class SignalingServer {
 
     if (disconnectedUserId) {
       this.userSessions.delete(ws)
-      console.log(`👋 User ${disconnectedUserId} disconnected from session ${sessionId}`)
+      console.log(`👋 User ${disconnectedUserId} disconnected from enhanced session ${sessionId}`)
 
       // Notify remaining users
       this.broadcastToSession(sessionId, {
@@ -1154,17 +1222,18 @@ class SignalingServer {
         userCount: session.users.size,
         temporary: true,
         timestamp: Date.now(),
+        enhanced: true,
       })
 
-      // Schedule cleanup of disconnected user after 2 minutes
+      // Schedule cleanup of disconnected user after 3 minutes (increased for better reconnection)
       setTimeout(() => {
         const currentSession = this.sessions.get(sessionId)
         if (currentSession) {
           const user = currentSession.users.get(disconnectedUserId!)
-          if (user && Date.now() - user.lastSeen.getTime() > 120000) {
-            // 2 minutes
+          if (user && Date.now() - user.lastSeen.getTime() > 180000) {
+            // 3 minutes
             currentSession.users.delete(disconnectedUserId!)
-            console.log(`🗑️ Removed inactive user ${disconnectedUserId} from session ${sessionId}`)
+            console.log(`🗑️ Removed inactive user ${disconnectedUserId} from enhanced session ${sessionId}`)
 
             // Notify remaining users
             this.broadcastToSession(sessionId, {
@@ -1173,16 +1242,17 @@ class SignalingServer {
               userCount: currentSession.users.size,
               permanent: true,
               timestamp: Date.now(),
+              enhanced: true,
             })
 
             // Remove empty sessions
             if (currentSession.users.size === 0) {
               this.sessions.delete(sessionId)
-              console.log(`🗑️ Removed empty session: ${sessionId}`)
+              console.log(`🗑️ Removed empty enhanced session: ${sessionId}`)
             }
           }
         }
-      }, 120000) // 2 minutes
+      }, 180000) // 3 minutes
     }
   }
 
@@ -1199,20 +1269,20 @@ class SignalingServer {
           this.send(userData.ws, message)
           sentCount++
         } catch (error) {
-          console.error(`❌ Failed to send message to user:`, error)
+          console.error(`❌ Failed to send enhanced message to user:`, error)
           failedCount++
         }
       }
     })
 
     if (sentCount > 0) {
-      console.log(`📡 Broadcasted ${message.type} to ${sentCount} users in session ${sessionId}`)
+      console.log(`📡 Broadcasted enhanced ${message.type} to ${sentCount} users in session ${sessionId}`)
     }
     if (failedCount > 0) {
-      console.log(`⚠️ Failed to send to ${failedCount} users in session ${sessionId}`)
+      console.log(`⚠️ Failed to send enhanced message to ${failedCount} users in session ${sessionId}`)
     }
     if (sentCount === 0 && session.users.size > 1) {
-      console.log(`⚠️ No active users to broadcast ${message.type} to in session ${sessionId}`)
+      console.log(`⚠️ No active users to broadcast enhanced ${message.type} to in session ${sessionId}`)
     }
   }
 
@@ -1221,18 +1291,19 @@ class SignalingServer {
       try {
         ws.send(JSON.stringify(message))
       } catch (error) {
-        console.error("❌ Error sending message:", error)
+        console.error("❌ Error sending enhanced message:", error)
       }
     }
   }
 
   private sendError(ws: WebSocket, message: string) {
-    console.error(`❌ Error: ${message}`)
+    console.error(`❌ Enhanced error: ${message}`)
     this.send(ws, {
       type: "error",
       message,
       timestamp: Date.now(),
       serverTime: new Date().toISOString(),
+      enhanced: true,
     })
   }
 
@@ -1241,24 +1312,24 @@ class SignalingServer {
     const expiredSessions: string[] = []
 
     this.sessions.forEach((session, sessionId) => {
-      // Remove sessions inactive for more than 10 minutes
+      // Remove sessions inactive for more than 15 minutes (increased)
       const inactiveTime = now.getTime() - session.lastActivity.getTime()
-      if (inactiveTime > 10 * 60 * 1000) {
+      if (inactiveTime > 15 * 60 * 1000) {
         expiredSessions.push(sessionId)
       } else {
         // Clean up inactive users within active sessions
         const inactiveUsers: string[] = []
         session.users.forEach((userData, userId) => {
           const userInactiveTime = now.getTime() - userData.lastSeen.getTime()
-          if (userInactiveTime > 5 * 60 * 1000) {
-            // 5 minutes
+          if (userInactiveTime > 10 * 60 * 1000) {
+            // 10 minutes (increased)
             inactiveUsers.push(userId)
           }
         })
 
         inactiveUsers.forEach((userId) => {
           session.users.delete(userId)
-          console.log(`🧹 Removed inactive user ${userId} from session ${sessionId}`)
+          console.log(`🧹 Removed inactive user ${userId} from enhanced session ${sessionId}`)
         })
 
         // Remove session if no users left
@@ -1273,20 +1344,20 @@ class SignalingServer {
       if (session) {
         // Close all connections in expired session
         session.users.forEach((userData) => {
-          this.sendError(userData.ws, "Session expired due to inactivity")
-          userData.ws.close(1000, "Session expired")
+          this.sendError(userData.ws, "Enhanced session expired due to inactivity")
+          userData.ws.close(1000, "Enhanced session expired")
         })
 
         this.sessions.delete(sessionId)
-        console.log(`⏰ Expired session: ${sessionId}`)
+        console.log(`⏰ Expired enhanced session: ${sessionId}`)
       }
     })
 
     if (this.sessions.size > 0) {
-      console.log(`📊 Active sessions: ${this.sessions.size}, Total connections: ${this.userSessions.size}`)
+      console.log(`📊 Active enhanced sessions: ${this.sessions.size}, Total connections: ${this.userSessions.size}`)
       this.sessions.forEach((session, sessionId) => {
         const activeUsers = Array.from(session.users.values()).filter((u) => u.ws.readyState === WebSocket.OPEN).length
-        console.log(`   Session ${sessionId}: ${activeUsers}/${session.users.size} active users`)
+        console.log(`   Enhanced session ${sessionId}: ${activeUsers}/${session.users.size} active users`)
       })
     }
   }
@@ -1297,6 +1368,8 @@ class SignalingServer {
       totalConnections: this.userSessions.size,
       uptime: process.uptime(),
       memory: process.memoryUsage(),
+      version: "2.0.0-enhanced",
+      features: ["enhanced-reliability", "auto-reconnect", "heartbeat-monitoring"],
       sessions: Array.from(this.sessions.entries()).map(([id, session]) => ({
         id,
         userCount: session.users.size,
@@ -1306,6 +1379,7 @@ class SignalingServer {
           isInitiator: userData.isInitiator,
           joinedAt: userData.joinedAt,
           lastSeen: userData.lastSeen,
+          lastHeartbeat: userData.lastHeartbeat,
           connected: userData.ws.readyState === WebSocket.OPEN,
         })),
         createdAt: session.createdAt,
@@ -1327,10 +1401,10 @@ function checkPort(port: number): Promise<boolean> {
   })
 }
 
-// Start the server with enhanced error handling
+// Start the enhanced server
 async function startServer() {
   const port = process.env.PORT || 8080
-  console.log(`🔍 Checking if port ${port} is available...`)
+  console.log(`🔍 Checking if port ${port} is available for enhanced server...`)
 
   try {
     const isPortAvailable = await checkPort(Number(port))
@@ -1344,26 +1418,26 @@ async function startServer() {
       process.exit(1)
     }
 
-    console.log(`✅ Port ${port} is available`)
+    console.log(`✅ Port ${port} is available for enhanced server`)
     new SignalingServer(Number(port))
   } catch (error) {
-    console.error("❌ Error starting server:", error)
+    console.error("❌ Error starting enhanced server:", error)
     process.exit(1)
   }
 }
 
 // Enhanced error handling
 process.on("uncaughtException", (error) => {
-  console.error("💥 Uncaught Exception:", error)
+  console.error("💥 Enhanced server uncaught exception:", error)
   process.exit(1)
 })
 
 process.on("unhandledRejection", (reason, promise) => {
-  console.error("💥 Unhandled Rejection at:", promise, "reason:", reason)
+  console.error("💥 Enhanced server unhandled rejection at:", promise, "reason:", reason)
   process.exit(1)
 })
 
-// Start the server
+// Start the enhanced server
 startServer()
 
 export default SignalingServer
