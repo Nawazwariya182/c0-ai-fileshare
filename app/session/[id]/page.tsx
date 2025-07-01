@@ -3348,7 +3348,7 @@ export default function SessionPage() {
     <div className="min-h-screen bg-purple-300 p-2 md:p-4">
       <div className="max-w-7xl mx-auto">
         <header className="text-center mb-4 md:mb-6">
-          <h1 className="text-2xl md:text-4xl font-black text-black mb-2">⚡ ULTRA-FAST SESSION: {sessionId}</h1>
+          <h1 className="text-2xl md:text-4xl font-black text-black mb-2">SESSION: {sessionId}</h1>
           <div className="flex items-center justify-center gap-2 md:gap-4 flex-wrap">
             <div
               className={`flex items-center gap-1 md:gap-2 px-2 md:px-4 py-1 md:py-2 border-2 md:border-4 border-black font-black text-xs md:text-sm ${
@@ -3387,13 +3387,13 @@ export default function SessionPage() {
               {userCount}/2
             </div>
 
-            {/* Connection Quality Indicator */}
+            {/* Connection Quality Indicator
             <div
               className={`flex items-center gap-1 md:gap-2 px-2 md:px-4 py-1 md:py-2 border-2 md:border-4 border-black font-black text-xs md:text-sm ${getConnectionQualityColor()}`}
             >
               <Activity className="w-3 md:w-5 h-3 md:h-5" />
               QUALITY: {connectionQuality.toUpperCase()}
-            </div>
+            </div> */}
 
             {/* Speed Indicator */}
             {currentSpeed > 0 && (
@@ -3406,7 +3406,6 @@ export default function SessionPage() {
             <div className="flex items-center gap-1 md:gap-2 px-2 md:px-4 py-1 md:py-2 border-2 md:border-4 border-black font-black bg-purple-400 text-xs md:text-sm">
               <Shield className="w-3 md:w-5 h-3 md:h-5" />
               {isMobile ? <Smartphone className="w-3 h-3" /> : <Monitor className="w-3 h-3" />}
-              {compressionEnabled && <span className="ml-1">🗜️</span>}
             </div>
           </div>
 
@@ -3432,7 +3431,7 @@ export default function SessionPage() {
                   className="neubrutalism-button bg-blue-500 text-white text-xs md:text-sm"
                 >
                   <RefreshCw className="w-3 md:w-4 h-3 md:h-4 mr-1" />
-                  ULTRA-FAST RECONNECT
+                  RECONNECT
                 </Button>
               )}
               <Button onClick={() => setError("")} variant="ghost" size="sm" className="touch-target">
@@ -3448,10 +3447,9 @@ export default function SessionPage() {
             <Card className="neubrutalism-card bg-yellow-300">
               <CardHeader className="pb-3 md:pb-6">
                 <CardTitle className="text-lg md:text-2xl font-black flex items-center gap-2">
-                  <Zap className="w-5 md:w-6 h-5 md:h-6" />⚡ ULTRA-FAST FILE TRANSFER
+                  <Zap className="w-5 md:w-6 h-5 md:h-6" />FILE TRANSFER
                   {getAIScanner() && <Scan className="w-4 h-4 text-green-600" {...{ title: "AI Scanning Enabled" }} />}
                   <Files className="w-4 h-4 text-blue-600" />
-                  {compressionEnabled && <span className="text-sm">🗜️ COMPRESSION</span>}
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -3477,9 +3475,9 @@ export default function SessionPage() {
                   <p className="text-lg md:text-xl font-black mb-2">
                     {connectionStatus === "connected"
                       ? isMobile
-                        ? "⚡ TAP FOR LIGHTNING-FAST TRANSFER"
-                        : "⚡ DROP FILES FOR LIGHTNING-FAST TRANSFER"
-                      : "WAITING FOR ULTRA-FAST CONNECTION..."}
+                        ? "TAP FOR TRANSFER"
+                        : "DROP FILES FOR TRANSFER"
+                      : "WAITING FOR CONNECTION..."}
                   </p>
                   {!isMobile && <p className="font-bold mb-4">or</p>}
 
@@ -3493,7 +3491,7 @@ export default function SessionPage() {
                       className="neubrutalism-button bg-blue-500 text-white hover:bg-white hover:text-blue-500 touch-target"
                       type="button"
                     >
-                      ⚡ CHOOSE FILES
+                     CHOOSE FILES
                     </Button>
 
                     <input
@@ -3508,13 +3506,13 @@ export default function SessionPage() {
                   </div>
 
                   <p className="text-xs md:text-sm font-bold mt-4 text-gray-600">
-                    Max 1GB per file • ⚡ 10x faster • Ultra-fast parallel chunks • Smart compression • AI Scanned •
+                    Max 1GB per file • AI Scanned •
                     SHA-256 verified
                   </p>
 
                   {connectionStatus === "connected" && (
                     <div className="mt-2 text-xs text-green-700 font-bold">
-                      ⚡ ULTRA-FAST: {transferOptimizer.getConcurrentChunks()} parallel chunks •{" "}
+                       {transferOptimizer.getConcurrentChunks()} parallel chunks •{" "}
                       {(transferOptimizer.getOptimalChunkSize() / 1024).toFixed(0)}KB chunks
                       {compressionEnabled && " • Smart compression"}
                     </div>
@@ -3525,7 +3523,7 @@ export default function SessionPage() {
           </div>
 
           {/* Mobile-specific file selection alternative */}
-          {isMobile && connectionStatus === "connected" && (
+          {/* {isMobile && connectionStatus === "connected" && (
             <div className="mt-4 p-4 bg-blue-100 border-2 border-blue-400 rounded">
               <p className="text-sm font-bold mb-2">📱 Mobile Ultra-Fast Transfer:</p>
               <label
@@ -3540,10 +3538,10 @@ export default function SessionPage() {
                 multiple
                 onChange={handleFileSelect}
                 className="hidden"
-                accept="*/*"
+                accept="*//*"
               />
             </div>
-          )}
+          )} */}
 
           {/* Row 2: Chat (2/3) + Connection Status (1/3) */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
@@ -3564,7 +3562,7 @@ export default function SessionPage() {
               <Card className="neubrutalism-card bg-blue-300 h-full">
                 <CardHeader className="pb-3 md:pb-6">
                   <CardTitle className="text-lg md:text-2xl font-black flex items-center gap-2">
-                    <Zap className="w-5 md:w-6 h-5 md:h-6" />⚡ ULTRA-FAST CONNECTION
+                    <Zap className="w-5 md:w-6 h-5 md:h-6" />CONNECTION
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -3572,8 +3570,8 @@ export default function SessionPage() {
                     {wsStatus === "connecting" && (
                       <div className="bg-yellow-200 p-4 md:p-6 border-4 border-black">
                         <div className="animate-spin w-6 md:w-8 h-6 md:h-8 border-4 border-black border-t-transparent rounded-full mx-auto mb-4 mobile-spinner"></div>
-                        <p className="font-black text-base md:text-lg">⚡ CONNECTING ULTRA-FAST...</p>
-                        <p className="font-bold text-sm md:text-base">Establishing lightning-fast signaling</p>
+                        <p className="font-black text-base md:text-lg">CONNECTING...</p>
+                        <p className="font-bold text-sm md:text-base">Establishing signaling</p>
                         {connectionStats && (
                           <p className="text-xs mt-2 text-gray-600">
                             Trying {connectionStats.healthyEndpoints} healthy endpoints...
@@ -3592,10 +3590,10 @@ export default function SessionPage() {
                     {wsStatus === "connected" && userCount === 2 && connectionStatus === "connecting" && (
                       <div className="bg-orange-200 p-4 md:p-6 border-4 border-black">
                         <div className="animate-spin w-6 md:w-8 h-6 md:h-8 border-4 border-black border-t-transparent rounded-full mx-auto mb-4 mobile-spinner"></div>
-                        <p className="font-black text-base md:text-lg">⚡ ESTABLISHING ULTRA-FAST P2P...</p>
-                        <p className="font-bold text-sm md:text-base">Setting up lightning-speed direct connection</p>
+                        <p className="font-black text-base md:text-lg">ESTABLISHING P2P...</p>
+                        <p className="font-bold text-sm md:text-base">Setting up direct connection</p>
                         <p className="text-xs md:text-sm mt-2">
-                          {isInitiator ? "Initiating ultra-fast connection..." : "Waiting for ultra-fast connection..."}
+                          {isInitiator ? "Initiating connection..." : "Waiting for connection..."}
                         </p>
                         <Button
                           onClick={() => {
@@ -3617,11 +3615,11 @@ export default function SessionPage() {
                       <div className="bg-green-200 p-4 md:p-6 border-4 border-black">
                         <Zap className="w-10 md:w-12 h-10 md:h-12 mx-auto mb-4 text-green-600" />
                         <p className="font-black text-base md:text-lg text-green-800">
-                          ⚡ ULTRA-FAST CONNECTION ACTIVE!
+                          CONNECTION ACTIVE!
                         </p>
-                        <p className="font-bold text-sm md:text-base">Ready for lightning-speed transfer & chat</p>
+                        <p className="font-bold text-sm md:text-base">Ready for transfer & chat</p>
                         <p className="text-xs md:text-sm mt-2">
-                          ⚡ Ultra-fast P2P • {transferOptimizer.getConcurrentChunks()} parallel • Quality:{" "}
+                          P2P • {transferOptimizer.getConcurrentChunks()} parallel • Quality:{" "}
                           {connectionQuality}
                           {compressionEnabled && " • Smart compression"}
                         </p>
@@ -3644,7 +3642,7 @@ export default function SessionPage() {
                           onClick={handleReconnect}
                           className="neubrutalism-button bg-red-500 text-white touch-target"
                         >
-                          <RefreshCw className="w-4 h-4 mr-2" />⚡ ULTRA-FAST RECONNECT
+                          <RefreshCw className="w-4 h-4 mr-2" />RECONNECT
                         </Button>
                       </div>
                     )}
@@ -3671,7 +3669,7 @@ export default function SessionPage() {
                           className="neubrutalism-button bg-orange-500 text-white touch-target"
                           size="sm"
                         >
-                          <RefreshCw className="w-3 md:w-4 h-3 md:h-4 mr-1" />⚡ FORCE RETRY
+                          <RefreshCw className="w-3 md:w-4 h-3 md:h-4 mr-1" />RETRY
                         </Button>
                       </div>
                     )}
@@ -3687,7 +3685,7 @@ export default function SessionPage() {
               <Card className="neubrutalism-card bg-green-200">
                 <CardHeader className="pb-3 md:pb-6">
                   <CardTitle className="text-lg md:text-2xl font-black flex items-center gap-2">
-                    <Zap className="w-5 md:w-6 h-5 md:h-6" />⚡ ULTRA-FAST FILE TRANSFERS
+                    <Zap className="w-5 md:w-6 h-5 md:h-6" />FILE TRANSFERS
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -3710,7 +3708,7 @@ export default function SessionPage() {
                                 className="text-xs bg-blue-100 px-1 rounded"
                                 title={`Compressed ${transfer.compressionRatio.toFixed(1)}x`}
                               >
-                                🗜️{transfer.compressionRatio.toFixed(1)}x
+                                {transfer.compressionRatio.toFixed(1)}x
                               </span>
                             )}
                             {transfer.checksum && (
@@ -3761,7 +3759,7 @@ export default function SessionPage() {
                           <span className="font-bold">{transfer.progress}%</span>
                           {transfer.transferStats && transfer.transferStats.speed > 0 && (
                             <span className="text-green-600 font-bold">
-                              ⚡ {formatSpeed(transfer.transferStats.speed)}
+                              {formatSpeed(transfer.transferStats.speed)}
                             </span>
                           )}
                           {transfer.transferStats && transfer.transferStats.eta > 0 && transfer.progress < 100 && (
