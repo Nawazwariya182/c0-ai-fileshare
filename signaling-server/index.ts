@@ -637,17 +637,28 @@ class SignalingServer {
 
     this.server = createServer()
 
-    // Add CORS headers for production
+    // FIXED: Enhanced CORS and request handling
     this.server.on("request", (req, res) => {
-      const allowedOrigins = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(",") : ["*"]
-
+      // Set CORS headers for all requests
       const origin = req.headers.origin
-      if (allowedOrigins.includes("*") || (origin && allowedOrigins.includes(origin))) {
-        res.setHeader("Access-Control-Allow-Origin", origin || "*")
+      const allowedOrigins = [
+        "https://p2p-file-share-fix.vercel.app",
+        "https://vercel.app",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://localhost:3000",
+      ]
+
+      // Allow all Vercel preview deployments
+      if (origin && (allowedOrigins.includes(origin) || origin.includes(".vercel.app"))) {
+        res.setHeader("Access-Control-Allow-Origin", origin)
+      } else if (!origin) {
+        res.setHeader("Access-Control-Allow-Origin", "*")
       }
 
-      res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-      res.setHeader("Access-Control-Allow-Headers", "Content-Type")
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+      res.setHeader("Access-Control-Allow-Credentials", "true")
 
       if (req.method === "OPTIONS") {
         res.writeHead(200)
@@ -664,40 +675,87 @@ class SignalingServer {
             timestamp: new Date().toISOString(),
             sessions: this.sessions.size,
             connections: this.userSessions.size,
+            uptime: process.uptime(),
+            version: "1.0.0",
           }),
         )
         return
       }
 
-      res.writeHead(404)
-      res.end("Not Found")
+      // Stats endpoint for debugging
+      if (req.url === "/stats") {
+        res.writeHead(200, { "Content-Type": "application/json" })
+        res.end(JSON.stringify(this.getStats()))
+        return
+      }
+
+      res.writeHead(404, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: "Not Found" }))
     })
 
-    // Create WebSocket server
+    // FIXED: Enhanced WebSocket server configuration
     this.wss = new WebSocketServer({
       server: this.server,
-      perMessageDeflate: false,
+      perMessageDeflate: {
+        zlibDeflateOptions: {
+          level: 3,
+          chunkSize: 1024,
+        },
+        threshold: 1024,
+        concurrencyLimit: 10,
+        serverMaxWindowBits: 15,
+        clientMaxWindowBits: 15,
+        serverMaxNoContextTakeover: false,
+        clientMaxNoContextTakeover: false,
+      },
       maxPayload: 100 * 1024 * 1024, // 100MB
       clientTracking: true,
-      handleProtocols: (protocols) => protocols[0] || false,
+      handleProtocols: (protocols) => {
+        console.log("📡 WebSocket protocols:", protocols)
+        return protocols[0] || false
+      },
+      verifyClient: (info) => {
+        // Enhanced client verification
+        const origin = info.origin
+        console.log(`🔍 Verifying WebSocket client from origin: ${origin}`)
+
+        // Allow connections from Vercel and localhost
+        if (!origin) return true // Allow connections without origin (like from Postman)
+
+        const allowedOrigins = [
+          "https://p2p-file-share-fix.vercel.app",
+          "http://localhost:3000",
+          "http://127.0.0.1:3000",
+          "https://localhost:3000",
+        ]
+
+        const isAllowed = allowedOrigins.includes(origin) || origin.includes(".vercel.app")
+        console.log(`${isAllowed ? "✅" : "❌"} Origin ${origin} ${isAllowed ? "allowed" : "blocked"}`)
+
+        return isAllowed
+      },
     })
 
     this.wss.on("connection", this.handleConnection.bind(this))
+    this.wss.on("error", (error) => {
+      console.error("❌ WebSocket Server error:", error)
+    })
 
     // Clean up expired sessions every minute
     setInterval(this.cleanupSessions.bind(this), 60000)
 
-    // Start server with proper port binding for Render
+    // Start server with proper error handling
     this.server.listen(port, "0.0.0.0", () => {
       console.log(`✅ Signaling server successfully started!`)
       console.log(`📡 HTTP server running on http://0.0.0.0:${port}`)
       console.log(`🔗 WebSocket server running on ws://0.0.0.0:${port}`)
       console.log(`🌍 Health check: http://0.0.0.0:${port}/health`)
+      console.log(`📊 Stats endpoint: http://0.0.0.0:${port}/stats`)
       console.log(`🔗 Ready to accept connections`)
       console.log("=".repeat(50))
     })
 
-    // Handle server errors
+    // Enhanced error handling
     this.server.on("error", (error: any) => {
       if (error.code === "EADDRINUSE") {
         console.error(`❌ Port ${port} is already in use!`)
@@ -714,14 +772,24 @@ class SignalingServer {
     // Graceful shutdown
     process.on("SIGTERM", this.shutdown.bind(this))
     process.on("SIGINT", this.shutdown.bind(this))
+
+    // Log server info
+    console.log(`🔧 WebSocket Server Configuration:`)
+    console.log(`   - Max Payload: ${100}MB`)
+    console.log(`   - Compression: Enabled`)
+    console.log(`   - Client Tracking: Enabled`)
+    console.log(`   - CORS: Configured for Vercel`)
   }
 
   private shutdown() {
     console.log("\n🛑 Shutting down signaling server...")
 
-    // Close all WebSocket connections
+    // Close all WebSocket connections gracefully
     this.wss.clients.forEach((ws) => {
-      ws.close(1000, "Server shutting down")
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "server-shutdown", message: "Server is shutting down" }))
+        ws.close(1000, "Server shutting down")
+      }
     })
 
     // Close the server
@@ -729,22 +797,36 @@ class SignalingServer {
       console.log("✅ Server shut down gracefully")
       process.exit(0)
     })
+
+    // Force exit after 10 seconds
+    setTimeout(() => {
+      console.log("⚠️ Force closing server")
+      process.exit(1)
+    }, 10000)
   }
 
-  private handleConnection(ws: WebSocket) {
-    console.log("🔗 New client connected")
+  private handleConnection(ws: WebSocket, req: any) {
+    const clientIP = req.socket.remoteAddress
+    const userAgent = req.headers["user-agent"]
+    console.log(`🔗 New client connected from ${clientIP}`)
+    console.log(`   User-Agent: ${userAgent}`)
 
-    // Send immediate confirmation
+    // Send immediate confirmation with server info
     this.send(ws, {
       type: "connected",
       message: "Connected to signaling server",
       timestamp: new Date().toISOString(),
+      serverVersion: "1.0.0",
+      features: ["file-transfer", "chat", "p2p"],
     })
 
+    // Set up connection handlers
     ws.on("message", (data) => {
       try {
         const message = JSON.parse(data.toString())
-        console.log(`📨 Received: ${message.type} ${message.sessionId ? `(session: ${message.sessionId})` : ""}`)
+        console.log(
+          `📨 Received: ${message.type} ${message.sessionId ? `(session: ${message.sessionId})` : ""} from ${clientIP}`,
+        )
         this.handleMessage(ws, message)
       } catch (error) {
         console.error("❌ Invalid message format:", error)
@@ -753,35 +835,58 @@ class SignalingServer {
     })
 
     ws.on("close", (code, reason) => {
-      console.log(`🔌 Client disconnected: ${code} ${reason}`)
+      console.log(`🔌 Client disconnected: ${code} ${reason} (${clientIP})`)
       this.handleDisconnection(ws)
     })
 
     ws.on("error", (error) => {
-      console.error("❌ WebSocket error:", error)
+      console.error(`❌ WebSocket error from ${clientIP}:`, error)
       this.handleDisconnection(ws)
+    })
+
+    // Enhanced ping/pong handling
+    ws.on("pong", (data) => {
+      console.log(`🏓 Pong received from ${clientIP}`)
     })
 
     // Send ping every 30 seconds to keep connection alive
     const pingInterval = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
-        ws.ping()
+        ws.ping("ping")
       } else {
         clearInterval(pingInterval)
       }
     }, 30000)
 
-    ws.on("pong", () => {
-      // Connection is alive
+    // Connection timeout handling
+    const connectionTimeout = setTimeout(
+      () => {
+        if (ws.readyState === WebSocket.OPEN) {
+          console.log(`⏰ Connection timeout for ${clientIP}`)
+          ws.close(1008, "Connection timeout")
+        }
+      },
+      5 * 60 * 1000,
+    ) // 5 minutes
+
+    ws.on("close", () => {
+      clearInterval(pingInterval)
+      clearTimeout(connectionTimeout)
     })
   }
 
   private handleMessage(ws: WebSocket, message: any) {
     const { type, sessionId, userId } = message
 
-    // Validate session ID format (6 alphanumeric characters)
+    // Enhanced session ID validation
     if (sessionId && !/^[A-Z0-9]{6}$/.test(sessionId)) {
-      this.sendError(ws, "Invalid session ID format")
+      this.sendError(ws, "Invalid session ID format. Must be 6 alphanumeric characters.")
+      return
+    }
+
+    // Enhanced user ID validation
+    if (userId && (typeof userId !== "string" || userId.length < 1 || userId.length > 100)) {
+      this.sendError(ws, "Invalid user ID format")
       return
     }
 
@@ -802,7 +907,7 @@ class SignalingServer {
         break
       default:
         console.log(`⚠️ Unknown message type: ${type}`)
-        this.sendError(ws, "Unknown message type")
+        this.sendError(ws, `Unknown message type: ${type}`)
     }
   }
 
@@ -832,7 +937,6 @@ class SignalingServer {
     const existingUser = session.users.get(userId)
     if (existingUser) {
       console.log(`🔄 User ${userId} reconnecting to session ${sessionId}`)
-
       // Update the WebSocket connection
       existingUser.ws = ws
       existingUser.lastSeen = new Date()
@@ -846,6 +950,7 @@ class SignalingServer {
         userCount: session.users.size,
         userId,
         isInitiator: existingUser.isInitiator,
+        reconnected: true,
       })
 
       // Notify other users about reconnection
@@ -870,7 +975,6 @@ class SignalingServer {
     }
 
     // Determine if this user should be the initiator
-    // First user to join becomes the initiator
     const isInitiator = session.users.size === 0
 
     // Add user to session
@@ -897,9 +1001,10 @@ class SignalingServer {
       userCount: session.users.size,
       userId,
       isInitiator,
+      sessionCreated: session.createdAt.toISOString(),
     })
 
-    // If this is the second user, notify the first user to start connection
+    // If this is the second user, notify both users to start connection
     if (session.users.size === 2) {
       console.log(`🚀 Session ${sessionId} is full, initiating P2P connection`)
 
@@ -943,7 +1048,11 @@ class SignalingServer {
       }
     }
 
-    this.send(ws, { type: "pong", timestamp: Date.now() })
+    this.send(ws, {
+      type: "pong",
+      timestamp: Date.now(),
+      serverTime: new Date().toISOString(),
+    })
   }
 
   private handleRetryConnection(ws: WebSocket, sessionId: string, userId: string) {
@@ -963,6 +1072,7 @@ class SignalingServer {
       type: "retry-connection",
       userId,
       attempt: session.connectionAttempts,
+      timestamp: Date.now(),
     })
   }
 
@@ -995,11 +1105,20 @@ class SignalingServer {
       `🔄 Relaying ${message.type} from ${userId} in session ${sessionId} to ${session.users.size - 1} other users`,
     )
 
-    // Add sender info to message
+    // Add sender info and validation to message
     const relayMessage = {
       ...message,
       senderId: userId,
       timestamp: Date.now(),
+      serverProcessed: new Date().toISOString(),
+    }
+
+    // Validate message size
+    const messageSize = JSON.stringify(relayMessage).length
+    if (messageSize > 1024 * 1024) {
+      // 1MB limit for signaling messages
+      this.sendError(ws, "Message too large")
+      return
     }
 
     // Relay message to other users in the session
@@ -1013,12 +1132,12 @@ class SignalingServer {
     const session = this.sessions.get(sessionId)
     if (!session) return
 
-    // Find and remove user from session
+    // Find and handle user disconnection
     let disconnectedUserId: string | undefined
     for (const [userId, userData] of session.users.entries()) {
       if (userData.ws === ws) {
         disconnectedUserId = userId
-        // Don't immediately remove - mark as disconnected for potential reconnection
+        // Mark as disconnected for potential reconnection
         userData.lastSeen = new Date(Date.now() - 60000) // Mark as 1 minute ago
         break
       }
@@ -1033,7 +1152,8 @@ class SignalingServer {
         type: "user-left",
         userId: disconnectedUserId,
         userCount: session.users.size,
-        temporary: true, // Indicate this might be temporary
+        temporary: true,
+        timestamp: Date.now(),
       })
 
       // Schedule cleanup of disconnected user after 2 minutes
@@ -1052,6 +1172,7 @@ class SignalingServer {
               userId: disconnectedUserId,
               userCount: currentSession.users.size,
               permanent: true,
+              timestamp: Date.now(),
             })
 
             // Remove empty sessions
@@ -1070,29 +1191,49 @@ class SignalingServer {
     if (!session) return
 
     let sentCount = 0
+    let failedCount = 0
+
     session.users.forEach((userData) => {
       if (userData.ws !== excludeWs && userData.ws.readyState === WebSocket.OPEN) {
-        this.send(userData.ws, message)
-        sentCount++
+        try {
+          this.send(userData.ws, message)
+          sentCount++
+        } catch (error) {
+          console.error(`❌ Failed to send message to user:`, error)
+          failedCount++
+        }
       }
     })
 
     if (sentCount > 0) {
       console.log(`📡 Broadcasted ${message.type} to ${sentCount} users in session ${sessionId}`)
-    } else if (session.users.size > 1) {
+    }
+    if (failedCount > 0) {
+      console.log(`⚠️ Failed to send to ${failedCount} users in session ${sessionId}`)
+    }
+    if (sentCount === 0 && session.users.size > 1) {
       console.log(`⚠️ No active users to broadcast ${message.type} to in session ${sessionId}`)
     }
   }
 
   private send(ws: WebSocket, message: any) {
     if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(message))
+      try {
+        ws.send(JSON.stringify(message))
+      } catch (error) {
+        console.error("❌ Error sending message:", error)
+      }
     }
   }
 
   private sendError(ws: WebSocket, message: string) {
     console.error(`❌ Error: ${message}`)
-    this.send(ws, { type: "error", message })
+    this.send(ws, {
+      type: "error",
+      message,
+      timestamp: Date.now(),
+      serverTime: new Date().toISOString(),
+    })
   }
 
   private cleanupSessions() {
@@ -1133,8 +1274,9 @@ class SignalingServer {
         // Close all connections in expired session
         session.users.forEach((userData) => {
           this.sendError(userData.ws, "Session expired due to inactivity")
-          userData.ws.close()
+          userData.ws.close(1000, "Session expired")
         })
+
         this.sessions.delete(sessionId)
         console.log(`⏰ Expired session: ${sessionId}`)
       }
@@ -1153,6 +1295,8 @@ class SignalingServer {
     return {
       activeSessions: this.sessions.size,
       totalConnections: this.userSessions.size,
+      uptime: process.uptime(),
+      memory: process.memoryUsage(),
       sessions: Array.from(this.sessions.entries()).map(([id, session]) => ({
         id,
         userCount: session.users.size,
@@ -1172,7 +1316,7 @@ class SignalingServer {
   }
 }
 
-// Check if port is available
+// Enhanced port checking
 function checkPort(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const server = createServer()
@@ -1183,28 +1327,32 @@ function checkPort(port: number): Promise<boolean> {
   })
 }
 
-// Start the server
+// Start the server with enhanced error handling
 async function startServer() {
   const port = process.env.PORT || 8080
   console.log(`🔍 Checking if port ${port} is available...`)
 
-  const isPortAvailable = await checkPort(Number(port))
+  try {
+    const isPortAvailable = await checkPort(Number(port))
+    if (!isPortAvailable) {
+      console.error(`❌ Port ${port} is already in use!`)
+      console.log("💡 Solutions:")
+      console.log("   1. Kill the process using the port:")
+      console.log("      Windows: netstat -ano | findstr :8080")
+      console.log("      Mac/Linux: lsof -ti:8080 | xargs kill")
+      console.log("   2. Or use a different port by setting PORT environment variable")
+      process.exit(1)
+    }
 
-  if (!isPortAvailable) {
-    console.error(`❌ Port ${port} is already in use!`)
-    console.log("💡 Solutions:")
-    console.log("   1. Kill the process using port 8080:")
-    console.log("      Windows: netstat -ano | findstr :8080")
-    console.log("      Mac/Linux: lsof -ti:8080 | xargs kill")
-    console.log("   2. Or use a different port by setting PORT environment variable")
+    console.log(`✅ Port ${port} is available`)
+    new SignalingServer(Number(port))
+  } catch (error) {
+    console.error("❌ Error starting server:", error)
     process.exit(1)
   }
-
-  console.log(`✅ Port ${port} is available`)
-  new SignalingServer(Number(port))
 }
 
-// Handle uncaught exceptions
+// Enhanced error handling
 process.on("uncaughtException", (error) => {
   console.error("💥 Uncaught Exception:", error)
   process.exit(1)

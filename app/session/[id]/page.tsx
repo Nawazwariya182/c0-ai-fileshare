@@ -1627,23 +1627,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { useUser } from "@clerk/nextjs"
 import { useParams, useRouter } from "next/navigation"
-import {
-  Upload,
-  Download,
-  Users,
-  Wifi,
-  WifiOff,
-  FileText,
-  AlertTriangle,
-  CheckCircle,
-  X,
-  RefreshCw,
-  Shield,
-  Smartphone,
-  Monitor,
-  Scan,
-  Files,
-} from "lucide-react"
+import { Upload, Download, Users, Wifi, WifiOff, FileText, AlertTriangle, CheckCircle, X, RefreshCw, Shield, Smartphone, Monitor, Scan, Files } from 'lucide-react'
 
 // Import new components and utilities
 import { FilePreviewModal } from "@/components/file-preview-modal"
@@ -1698,6 +1682,7 @@ export default function SessionPage() {
   const [connectionAttempts, setConnectionAttempts] = useState(0)
   const [lastHeartbeat, setLastHeartbeat] = useState<Date>(new Date())
   const [isMobile, setIsMobile] = useState(false)
+  const [currentWsUrl, setCurrentWsUrl] = useState<string>("")
 
   // New state for enhanced features
   const [previewFiles, setPreviewFiles] = useState<File[]>([])
@@ -1722,11 +1707,8 @@ export default function SessionPage() {
 
   // Initialize session management and notifications
   useEffect(() => {
-    // Request notification permission
     NotificationManager.requestPermission()
-    // Create session
     SessionManager.createSession(sessionId)
-    // Start session timer
     startSessionTimer()
 
     return () => {
@@ -1805,14 +1787,13 @@ export default function SessionPage() {
       wsRef.current = null
     }
     iceCandidatesQueue.current = []
-    setChatMessages([]) // Clear chat on cleanup
+    setChatMessages([])
   }, [])
 
-  // WebSocket connection with retry logic - FIXED URLs
+  // FIXED: WebSocket connection with proper URLs and error handling
   const connectWebSocket = useCallback(() => {
     if (!user || !sessionId) return
 
-    // Validate session before connecting
     if (!SessionManager.validateSession(sessionId)) {
       setError("Session has expired or is invalid")
       router.push("/")
@@ -1825,22 +1806,28 @@ export default function SessionPage() {
 
     // FIXED: Proper WebSocket URLs for production
     const getWebSocketUrls = () => {
+      const urls: string[] = []
+      
       // Primary URL from environment variable
-      const primaryUrl = process.env.NEXT_PUBLIC_WS_URL
-
-      if (primaryUrl) {
-        return [primaryUrl]
+      if (process.env.NEXT_PUBLIC_WS_URL) {
+        urls.push(process.env.NEXT_PUBLIC_WS_URL)
       }
 
-      // Fallback URLs based on environment
+      // Production URLs
       if (process.env.NODE_ENV === "production") {
-        return [
-          "wss://signaling-server-1ckx.onrender.com", // Your Render WebSocket URL
-          "ws://signaling-server-1ckx.onrender.com", // HTTP fallback
-        ]
+        urls.push(
+          "wss://signaling-server-1ckx.onrender.com",
+          "ws://signaling-server-1ckx.onrender.com"
+        )
       } else {
-        return ["ws://localhost:8080", "ws://127.0.0.1:8080"]
+        // Development URLs
+        urls.push(
+          "ws://localhost:8080",
+          "ws://127.0.0.1:8080"
+        )
       }
+
+      return [...new Set(urls)] // Remove duplicates
     }
 
     const wsUrls = getWebSocketUrls()
@@ -1849,73 +1836,94 @@ export default function SessionPage() {
     const tryConnection = () => {
       if (currentUrlIndex >= wsUrls.length) {
         setWsStatus("error")
-        setError("Failed to connect to signaling server. Please check your internet connection.")
+        setError(`Failed to connect to signaling server. Tried ${wsUrls.length} URLs. Please check your connection.`)
+        console.error("❌ All WebSocket URLs failed:", wsUrls)
         return
       }
 
       const wsUrl = wsUrls[currentUrlIndex]
-      console.log(`🔗 Trying WebSocket URL: ${wsUrl}`)
+      console.log(`🔗 Trying WebSocket URL ${currentUrlIndex + 1}/${wsUrls.length}: ${wsUrl}`)
+      setCurrentWsUrl(wsUrl)
 
-      const ws = new WebSocket(wsUrl)
-      wsRef.current = ws
+      try {
+        const ws = new WebSocket(wsUrl)
+        wsRef.current = ws
 
-      const connectionTimeout = setTimeout(() => {
-        if (ws.readyState === WebSocket.CONNECTING) {
-          console.log(`⏰ Connection timeout for ${wsUrl}`)
-          ws.close()
-          currentUrlIndex++
-          tryConnection()
-        }
-      }, 10000) // Increased timeout to 10 seconds
+        const connectionTimeout = setTimeout(() => {
+          if (ws.readyState === WebSocket.CONNECTING) {
+            console.log(`⏰ Connection timeout for ${wsUrl}`)
+            ws.close()
+            currentUrlIndex++
+            setTimeout(tryConnection, 1000) // Wait 1 second before trying next URL
+          }
+        }, 15000) // 15 second timeout
 
-      ws.onopen = () => {
-        clearTimeout(connectionTimeout)
-        console.log(`✅ WebSocket connected to ${wsUrl}`)
-        setWsStatus("connected")
-        setReconnectAttempts(0)
+        ws.onopen = () => {
+          clearTimeout(connectionTimeout)
+          console.log(`✅ WebSocket connected to ${wsUrl}`)
+          setWsStatus("connected")
+          setReconnectAttempts(0)
+          setError("")
 
-        // Join session immediately
-        ws.send(
-          JSON.stringify({
+          // Join session immediately
+          const joinMessage = {
             type: "join",
             sessionId,
             userId: user.id,
             reconnect: connectionAttempts > 0,
             timestamp: Date.now(),
-          }),
-        )
+          }
+          
+          console.log("📤 Sending join message:", joinMessage)
+          ws.send(JSON.stringify(joinMessage))
 
-        // Start heartbeat
-        startHeartbeat()
-      }
-
-      ws.onmessage = async (event) => {
-        try {
-          const message = JSON.parse(event.data)
-          console.log("📨 Received message:", message.type, message)
-          setLastHeartbeat(new Date())
-          await handleSignalingMessage(message)
-        } catch (error) {
-          console.error("❌ Error parsing message:", error)
+          // Start heartbeat
+          startHeartbeat()
         }
-      }
 
-      ws.onclose = (event) => {
-        clearTimeout(connectionTimeout)
-        console.log(`🔌 WebSocket closed: ${event.code} ${event.reason}`)
-        setWsStatus("disconnected")
-        stopHeartbeat()
-
-        if (event.code !== 1000) {
-          scheduleReconnect()
+        ws.onmessage = async (event) => {
+          try {
+            const message = JSON.parse(event.data)
+            console.log("📨 Received message:", message.type, message)
+            setLastHeartbeat(new Date())
+            await handleSignalingMessage(message)
+          } catch (error) {
+            console.error("❌ Error parsing message:", error, event.data)
+          }
         }
-      }
 
-      ws.onerror = (error) => {
-        clearTimeout(connectionTimeout)
-        console.error(`❌ WebSocket error on ${wsUrl}:`, error)
+        ws.onclose = (event) => {
+          clearTimeout(connectionTimeout)
+          console.log(`🔌 WebSocket closed: ${event.code} ${event.reason}`)
+          setWsStatus("disconnected")
+          stopHeartbeat()
+
+          if (event.code !== 1000 && event.code !== 1001) {
+            // Don't reconnect on normal closure
+            if (currentUrlIndex < wsUrls.length - 1) {
+              // Try next URL
+              currentUrlIndex++
+              setTimeout(tryConnection, 1000)
+            } else {
+              // All URLs failed, schedule reconnect
+              scheduleReconnect()
+            }
+          }
+        }
+
+        ws.onerror = (error) => {
+          clearTimeout(connectionTimeout)
+          console.error(`❌ WebSocket error on ${wsUrl}:`, error)
+          
+          // Try next URL immediately
+          currentUrlIndex++
+          setTimeout(tryConnection, 500)
+        }
+
+      } catch (error) {
+        console.error(`❌ Failed to create WebSocket for ${wsUrl}:`, error)
         currentUrlIndex++
-        tryConnection()
+        setTimeout(tryConnection, 500)
       }
     }
 
@@ -1927,7 +1935,6 @@ export default function SessionPage() {
     heartbeatIntervalRef.current = setInterval(() => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({ type: "ping", sessionId, userId: user?.id }))
-        // Extend session on activity
         SessionManager.extendSession(sessionId)
       }
     }, 30000)
@@ -2097,7 +2104,7 @@ export default function SessionPage() {
         console.log("⏰ P2P connection timeout")
         setError("Connection timeout. Click retry to attempt again.")
       }
-    }, 30000) // 30 second timeout
+    }, 30000)
 
     return pc
   }, [sessionId])
@@ -2117,7 +2124,6 @@ export default function SessionPage() {
         clearTimeout(connectionTimeoutRef.current)
       }
 
-      // Send a test message to verify bidirectional communication
       try {
         channel.send(
           JSON.stringify({
@@ -2142,7 +2148,6 @@ export default function SessionPage() {
       setConnectionStatus("disconnected")
     }
 
-    // Store reference to data channel
     if (peerConnectionRef.current) {
       peerConnectionRef.current.dataChannel = channel
     }
@@ -2230,10 +2235,9 @@ export default function SessionPage() {
 
       const pc = createPeerConnection()
 
-      // Create data channel with FIXED configuration (only maxRetransmits, no maxPacketLifeTime)
       const dataChannel = pc.createDataChannel("fileTransfer", {
         ordered: true,
-        maxRetransmits: 3, // Only use maxRetransmits, not maxPacketLifeTime
+        maxRetransmits: 3,
       })
 
       console.log("📡 Created data channel:", dataChannel.label)
@@ -2283,7 +2287,6 @@ export default function SessionPage() {
       console.log("📥 Setting remote description...")
       await pc.setRemoteDescription(offer)
 
-      // Process any queued ICE candidates
       while (iceCandidatesQueue.current.length > 0) {
         const candidate = iceCandidatesQueue.current.shift()
         if (candidate) {
@@ -2325,15 +2328,12 @@ export default function SessionPage() {
     try {
       console.log("📥 Handling received answer")
       if (peerConnectionRef.current?.pc) {
-        // Check the current signaling state before setting remote description
         console.log("Current signaling state:", peerConnectionRef.current.pc.signalingState)
 
-        // Only set remote description if we're in the correct state
         if (peerConnectionRef.current.pc.signalingState === "have-local-offer") {
           await peerConnectionRef.current.pc.setRemoteDescription(answer)
           console.log("✅ Answer processed successfully")
 
-          // Process any queued ICE candidates
           while (iceCandidatesQueue.current.length > 0) {
             const candidate = iceCandidatesQueue.current.shift()
             if (candidate) {
@@ -2350,7 +2350,6 @@ export default function SessionPage() {
             "⚠️ Cannot set remote description - wrong signaling state:",
             peerConnectionRef.current.pc.signalingState,
           )
-          // If we're in wrong state, reset the connection
           resetPeerConnection()
           setTimeout(() => {
             if (!isInitiator) {
@@ -2475,7 +2474,6 @@ export default function SessionPage() {
         const progress = Math.round((receivedSize / fileData.totalSize) * 100)
         setFileTransfers((prev) => prev.map((t) => (t.id === fileId ? { ...t, progress } : t)))
 
-        // Update current speed
         setCurrentSpeed(speedThrottleRef.current.getCurrentSpeed())
       }
     }
@@ -2572,10 +2570,8 @@ export default function SessionPage() {
 
     console.log(`📤 Starting batch file transfer: ${files.length} files`)
 
-    // Process each file sequentially to avoid overwhelming the connection
     for (const file of files) {
       await sendSingleFile(file)
-      // Small delay between files
       await new Promise((resolve) => setTimeout(resolve, 100))
     }
   }
@@ -2590,7 +2586,6 @@ export default function SessionPage() {
     try {
       const fileId = Math.random().toString(36).substring(2, 15)
 
-      // Create transfer record with scanning status
       const transfer: FileTransfer = {
         id: fileId,
         name: file.name,
@@ -2603,7 +2598,6 @@ export default function SessionPage() {
 
       setFileTransfers((prev) => [...prev, transfer])
 
-      // AI scan the file
       const scanner = getAIScanner()
       if (scanner) {
         console.log("🔍 Scanning file with AI:", file.name)
@@ -2618,15 +2612,12 @@ export default function SessionPage() {
         }
       }
 
-      // Calculate checksum
       const checksum = await calculateChecksum(file)
 
-      // Update transfer with checksum
       setFileTransfers((prev) => prev.map((t) => (t.id === fileId ? { ...t, checksum, status: "transferring" } : t)))
 
       console.log("📤 Starting file transfer:", file.name, "Size:", file.size, "ID:", fileId)
 
-      // Send file metadata
       if (!peerConnection?.dataChannel || peerConnection.dataChannel.readyState !== "open") {
         setError("Data channel not ready for file transfer")
         setFileTransfers((prev) => prev.map((t) => (t.id === fileId ? { ...t, status: "error" } : t)))
@@ -2644,8 +2635,7 @@ export default function SessionPage() {
         }),
       )
 
-      // Send file in chunks with speed throttling
-      const chunkSize = 16384 // 16KB chunks
+      const chunkSize = 16384
       const reader = new FileReader()
       let offset = 0
       let isTransferring = true
@@ -2666,7 +2656,6 @@ export default function SessionPage() {
 
         const chunk = e.target.result as ArrayBuffer
 
-        // Apply speed throttling
         await speedThrottleRef.current.throttle(chunk.byteLength)
 
         const fileIdBytes = new TextEncoder().encode(fileId)
@@ -2685,7 +2674,7 @@ export default function SessionPage() {
             setCurrentSpeed(speedThrottleRef.current.getCurrentSpeed())
 
             if (offset < file.size) {
-              setTimeout(sendChunk, 10) // Small delay to prevent overwhelming
+              setTimeout(sendChunk, 10)
             } else {
               console.log("📤 File transfer complete:", file.name)
               peerConnection.dataChannel.send(
@@ -2727,23 +2716,19 @@ export default function SessionPage() {
     }
   }
 
-  // Enhanced file selection with multi-file support
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
     if (files.length > 0) {
-      // Show preview for all selected files
       setPreviewFiles(files)
       setShowPreview(true)
     }
     e.target.value = ""
   }
 
-  // Handle adding more files to existing preview
   const handleAddMoreFiles = () => {
     fileInputRef.current?.click()
   }
 
-  // Handle preview modal actions
   const handlePreviewSend = (files: File[]) => {
     sendFiles(files)
     setPreviewFiles([])
@@ -2753,7 +2738,6 @@ export default function SessionPage() {
     setPreviewFiles([])
   }
 
-  // Handle chat message sending
   const handleSendChatMessage = (content: string, type: "text" | "clipboard") => {
     if (!peerConnection?.dataChannel || peerConnection.dataChannel.readyState !== "open") {
       setError("Cannot send message - not connected")
@@ -2768,10 +2752,8 @@ export default function SessionPage() {
       type,
     }
 
-    // Add to local messages
     setChatMessages((prev) => [...prev, message])
 
-    // Send to peer
     peerConnection.dataChannel.send(
       JSON.stringify({
         type: "chat-message",
@@ -2783,7 +2765,6 @@ export default function SessionPage() {
       }),
     )
 
-    // Extend session on activity
     SessionManager.extendSession(sessionId)
   }
 
@@ -2792,13 +2773,11 @@ export default function SessionPage() {
     setDragOver(false)
     const files = Array.from(e.dataTransfer.files)
     if (files.length > 0) {
-      // Show preview for all dropped files
       setPreviewFiles(files)
       setShowPreview(true)
     }
   }
 
-  // Mobile-specific touch handlers
   const handleTouchStart = (e: React.TouchEvent) => {
     e.preventDefault()
     setDragOver(true)
@@ -2809,7 +2788,6 @@ export default function SessionPage() {
     setDragOver(false)
   }
 
-  // Format time remaining
   const formatTimeRemaining = (ms: number): string => {
     const minutes = Math.floor(ms / 60000)
     const seconds = Math.floor((ms % 60000) / 1000)
@@ -2869,6 +2847,13 @@ export default function SessionPage() {
               {isMobile ? <Smartphone className="w-3 h-3" /> : <Monitor className="w-3 h-3" />}
             </div>
           </div>
+          
+          {/* Debug info for connection troubleshooting */}
+          {process.env.NODE_ENV === "development" && (
+            <div className="mt-2 text-xs text-gray-600">
+              Current WS URL: {currentWsUrl} | Attempts: {reconnectAttempts}
+            </div>
+          )}
         </header>
 
         {error && (
@@ -2876,7 +2861,7 @@ export default function SessionPage() {
             <CardContent className="p-3 md:p-4 flex items-center gap-2">
               <AlertTriangle className="w-4 md:w-5 h-4 md:h-5 flex-shrink-0" />
               <span className="font-bold flex-1 text-sm md:text-base">{error}</span>
-              {wsStatus === "error" && (
+              {(wsStatus === "error" || wsStatus === "disconnected") && (
                 <Button
                   onClick={handleReconnect}
                   size="sm"
@@ -2974,6 +2959,11 @@ export default function SessionPage() {
                         <div className="animate-spin w-6 md:w-8 h-6 md:h-8 border-4 border-black border-t-transparent rounded-full mx-auto mb-4 mobile-spinner"></div>
                         <p className="font-black text-base md:text-lg">CONNECTING TO SERVER...</p>
                         <p className="font-bold text-sm md:text-base">Establishing signaling connection</p>
+                        {currentWsUrl && (
+                          <p className="text-xs mt-2 text-gray-600 break-all">
+                            Trying: {currentWsUrl}
+                          </p>
+                        )}
                       </div>
                     )}
                     {wsStatus === "connected" && userCount < 2 && (
@@ -3108,7 +3098,7 @@ export default function SessionPage() {
                             className={`px-2 py-1 text-xs font-bold border-2 border-black flex-shrink-0 ${
                               transfer.status === "completed"
                                 ? "bg-green-300"
-                                : transfer.status === "transferring"
+                                : transfer.status ===  "transferring"
                                   ? "bg-yellow-300"
                                   : transfer.status === "scanning"
                                     ? "bg-blue-300"
