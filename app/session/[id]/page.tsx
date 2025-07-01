@@ -1631,8 +1631,11 @@ import {
   Upload,
   Download,
   Users,
+  Wifi,
   WifiOff,
+  FileText,
   AlertTriangle,
+  CheckCircle,
   X,
   RefreshCw,
   Shield,
@@ -1640,9 +1643,6 @@ import {
   Monitor,
   Scan,
   Files,
-  Zap,
-  Activity,
-  Signal,
 } from "lucide-react"
 
 // Import new components and utilities
@@ -1652,10 +1652,6 @@ import { getAIScanner, type ScanResult } from "@/lib/ai-scanner"
 import { SessionManager } from "@/lib/session-manager"
 import { SpeedThrottle, type SpeedLimit } from "@/lib/speed-throttle"
 import { NotificationManager } from "@/lib/notifications"
-import { TransferOptimizer, ChunkManager, ConnectionStabilizer, type TransferStats } from "@/lib/transfer-optimizer"
-import { CompressionUtils } from "@/lib/compression-utils"
-import { ConnectionManager, FastHandshake } from "@/lib/connection-manager"
-import { FallbackSignaling } from "@/lib/fallback-signaling"
 
 interface FileTransfer {
   id: string
@@ -1667,10 +1663,6 @@ interface FileTransfer {
   direction: "sending" | "receiving"
   checksum?: string
   scanResult?: ScanResult
-  transferStats?: TransferStats
-  chunkManager?: ChunkManager
-  startTime?: number
-  compressionRatio?: number
 }
 
 interface ChatMessage {
@@ -1685,9 +1677,6 @@ interface PeerConnection {
   pc: RTCPeerConnection
   dataChannel?: RTCDataChannel
   connected: boolean
-  lastActivity: Date
-  reconnectAttempts: number
-  stabilizer?: ConnectionStabilizer
 }
 
 export default function SessionPage() {
@@ -1718,12 +1707,6 @@ export default function SessionPage() {
   const [currentSpeed, setCurrentSpeed] = useState(0)
   const [sessionTimeLeft, setSessionTimeLeft] = useState(0)
   const [showExpiryWarning, setShowExpiryWarning] = useState(false)
-  const [connectionQuality, setConnectionQuality] = useState<"excellent" | "good" | "poor" | "unknown">("unknown")
-  const [transferOptimizer] = useState(() => new TransferOptimizer())
-  const [compressionEnabled, setCompressionEnabled] = useState(false)
-  const [overallTransferStats, setOverallTransferStats] = useState<TransferStats | null>(null)
-  const [connectionManager] = useState(() => new ConnectionManager())
-  const [connectionStats, setConnectionStats] = useState<any>(null)
 
   const wsRef = useRef<WebSocket | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -1731,38 +1714,12 @@ export default function SessionPage() {
   const peerConnectionRef = useRef<PeerConnection | null>(null)
   const connectionTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null)
-  const peerHeartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null)
-  const connectionMonitorRef = useRef<NodeJS.Timeout | null>(null)
   const iceCandidatesQueue = useRef<RTCIceCandidateInit[]>([])
   const speedThrottleRef = useRef<SpeedThrottle>(new SpeedThrottle())
   const sessionTimerRef = useRef<NodeJS.Timeout | null>(null)
   const receivedChunksRef = useRef<
-    Map<
-      string,
-      {
-        chunks: Map<number, ArrayBuffer>
-        totalChunks: number
-        receivedChunks: number
-        fileName: string
-        fileType: string
-        checksum?: string
-        chunkManager?: ChunkManager
-        isCompressed?: boolean
-      }
-    >
+    Map<string, { chunks: ArrayBuffer[]; totalSize: number; fileName: string; fileType: string; checksum?: string }>
   >(new Map())
-  const lastPeerHeartbeatRef = useRef<Date>(new Date())
-  const connectionStatsRef = useRef({
-    packetsLost: 0,
-    roundTripTime: 0,
-    bytesReceived: 0,
-    bytesSent: 0,
-  })
-
-  // Initialize compression support check
-  useEffect(() => {
-    CompressionUtils.isCompressionSupported().then(setCompressionEnabled)
-  }, [])
 
   // Initialize session management and notifications
   useEffect(() => {
@@ -1770,27 +1727,12 @@ export default function SessionPage() {
     SessionManager.createSession(sessionId)
     startSessionTimer()
 
-    // Pre-warm connections for faster startup
-    const fastHandshake = FastHandshake.getInstance()
-    const urls = ["wss://signaling-server-1ckx.onrender.com", "ws://localhost:8080"]
-    fastHandshake.preWarmConnections(urls)
-
     return () => {
       if (sessionTimerRef.current) {
         clearInterval(sessionTimerRef.current)
       }
-      fastHandshake.cleanup()
     }
   }, [sessionId])
-
-  // Update connection stats periodically
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setConnectionStats(connectionManager.getConnectionStats())
-    }, 5000)
-
-    return () => clearInterval(interval)
-  }, [connectionManager])
 
   // Session timer
   const startSessionTimer = () => {
@@ -1837,22 +1779,14 @@ export default function SessionPage() {
     speedThrottleRef.current.setLimit(speedLimit)
   }, [speedLimit])
 
-  // Enhanced cleanup function
+  // Cleanup function
   const cleanup = useCallback(() => {
     console.log("🧹 Cleaning up connections...")
-
-    // Clear all timeouts and intervals
     if (connectionTimeoutRef.current) {
       clearTimeout(connectionTimeoutRef.current)
     }
     if (heartbeatIntervalRef.current) {
       clearInterval(heartbeatIntervalRef.current)
-    }
-    if (peerHeartbeatIntervalRef.current) {
-      clearInterval(peerHeartbeatIntervalRef.current)
-    }
-    if (connectionMonitorRef.current) {
-      clearInterval(connectionMonitorRef.current)
     }
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current)
@@ -1860,42 +1794,20 @@ export default function SessionPage() {
     if (sessionTimerRef.current) {
       clearInterval(sessionTimerRef.current)
     }
-
-    // Close peer connection gracefully
     if (peerConnectionRef.current?.pc) {
-      try {
-        if (peerConnectionRef.current.dataChannel) {
-          peerConnectionRef.current.dataChannel.close()
-        }
-        if (peerConnectionRef.current.stabilizer) {
-          peerConnectionRef.current.stabilizer.clearQueue()
-        }
-        peerConnectionRef.current.pc.close()
-      } catch (error) {
-        console.error("Error closing peer connection:", error)
-      }
+      peerConnectionRef.current.pc.close()
       peerConnectionRef.current = null
     }
-
-    // Close WebSocket gracefully
     if (wsRef.current) {
-      try {
-        wsRef.current.close(1000, "Component cleanup")
-      } catch (error) {
-        console.error("Error closing WebSocket:", error)
-      }
+      wsRef.current.close(1000, "Component cleanup")
       wsRef.current = null
     }
-
-    // Cleanup connection manager
-    connectionManager.cleanup()
-
     iceCandidatesQueue.current = []
     setChatMessages([])
-  }, [connectionManager])
+  }, [])
 
-  //  WebSocket connection with intelligent endpoint selection
-  const connectWebSocket = useCallback(async () => {
+  // FIXED: WebSocket connection with proper URLs and error handling
+  const connectWebSocket = useCallback(() => {
     if (!user || !sessionId) return
 
     if (!SessionManager.validateSession(sessionId)) {
@@ -1904,152 +1816,137 @@ export default function SessionPage() {
       return
     }
 
-    console.log(`🚀 Attempting WebSocket connection (attempt ${reconnectAttempts + 1})`)
+    console.log(`🔌 Attempting WebSocket connection (attempt ${reconnectAttempts + 1})`)
     setWsStatus("connecting")
     setError("")
 
-    try {
-      // Try to get pre-warmed connection first
-      const fastHandshake = FastHandshake.getInstance()
-      let ws: WebSocket | null = null
+    // FIXED: Proper WebSocket URLs for production
+    const getWebSocketUrls = () => {
+      const urls: string[] = []
 
-      // Check for pre-warmed connections
-      const preWarmedUrls = ["wss://signaling-server-1ckx.onrender.com", "ws://localhost:8080"]
-
-      for (const url of preWarmedUrls) {
-        const preWarmed = fastHandshake.getPreWarmedConnection(url)
-        if (preWarmed) {
-          ws = preWarmed
-          setCurrentWsUrl(url)
-          console.log(` Using pre-warmed connection to ${url}`)
-          break
-        }
+      // Primary URL from environment variable
+      if (process.env.NEXT_PUBLIC_WS_URL) {
+        urls.push(process.env.NEXT_PUBLIC_WS_URL)
       }
 
-      // If no pre-warmed connection, get optimal connection
-      if (!ws) {
-        try {
-          ws = await connectionManager.getOptimalConnection()
-          setCurrentWsUrl(ws.url)
-        } catch (connectionError) {
-          console.error("❌ All connection attempts failed:", connectionError)
-
-          // Provide specific error messages based on the failure
-          if (reconnectAttempts === 0) {
-            setError("Unable to connect to signaling server. Trying backup servers...")
-          } else if (reconnectAttempts < 5) {
-            setError(`Connection attempt ${reconnectAttempts + 1} failed. Retrying with backup servers...`)
-          } else {
-            setError("Connection failed after multiple attempts. Please check your internet connection and try again.")
-          }
-
-          setWsStatus("error")
-          scheduleReconnect()
-          return
-        }
+      // Production URLs
+      if (process.env.NODE_ENV === "production") {
+        urls.push("wss://signaling-server-1ckx.onrender.com", "ws://signaling-server-1ckx.onrender.com")
+      } else {
+        // Development URLs
+        urls.push("ws://localhost:8080", "ws://127.0.0.1:8080")
       }
 
-      // If main connection fails, try fallback signaling
-      if (!ws && reconnectAttempts >= 3) {
-        console.log("🔄 Attempting fallback signaling connection...")
-        try {
-          const fallbackSignaling = FallbackSignaling.getInstance()
-          ws = await fallbackSignaling.createFallbackConnection(sessionId, user.id)
-          setCurrentWsUrl("fallback-relay")
-          setError("Connected via backup relay. Some features may be limited.")
-        } catch (fallbackError) {
-          console.error("❌ Fallback connection also failed:", fallbackError)
-        }
-      }
-
-      wsRef.current = ws
-
-      // Set up event handlers
-      ws.onopen = () => {
-        console.log(`✅ WebSocket connected to ${ws!.url}`)
-        setWsStatus("connected")
-        setReconnectAttempts(0)
-        setError("")
-
-        const joinMessage = {
-          type: "join",
-          sessionId,
-          userId: user.id,
-          reconnect: connectionAttempts > 0,
-          timestamp: Date.now(),
-          fastConnect: true,
-        }
-
-        console.log("📤 Sending join message:", joinMessage)
-        ws!.send(JSON.stringify(joinMessage))
-        startHeartbeat()
-      }
-
-      ws.onmessage = async (event) => {
-        try {
-          const message = JSON.parse(event.data)
-          console.log("📨 Received message:", message.type)
-          setLastHeartbeat(new Date())
-          await handleSignalingMessage(message)
-        } catch (error) {
-          console.error("❌ Error parsing message:", error, event.data)
-        }
-      }
-
-      ws.onclose = (event) => {
-        console.log(`🔌 WebSocket closed: ${event.code} ${event.reason}`)
-        setWsStatus("disconnected")
-        stopHeartbeat()
-
-        if (event.code !== 1000 && event.code !== 1001) {
-          connectionManager.markEndpointFailed(ws!.url)
-
-          // Provide user-friendly error message
-          if (event.code === 1006) {
-            setError("Connection lost unexpectedly. Attempting to reconnect...")
-          } else if (event.code === 1002) {
-            setError("Server protocol error. Trying alternative servers...")
-          } else {
-            setError("Connection interrupted. Reconnecting...")
-          }
-
-          scheduleReconnect()
-        }
-      }
-
-      ws.onerror = (error) => {
-        console.error(`❌ WebSocket error:`, error)
-        connectionManager.markEndpointFailed(ws!.url)
-        setWsStatus("error")
-
-        // Provide helpful error message
-        setError("Network error occurred. Checking alternative connection routes...")
-        scheduleReconnect()
-      }
-    } catch (error) {
-      console.error("❌ Failed to establish WebSocket connection:", error)
-      setWsStatus("error")
-      setError("Unable to establish connection. Please check your internet connection and try again.")
-      scheduleReconnect()
+      return [...new Set(urls)] // Remove duplicates
     }
-  }, [user, sessionId, reconnectAttempts, connectionAttempts, connectionManager])
 
-  // Enhanced heartbeat with better timing
+    const wsUrls = getWebSocketUrls()
+    let currentUrlIndex = 0
+
+    const tryConnection = () => {
+      if (currentUrlIndex >= wsUrls.length) {
+        setWsStatus("error")
+        setError(`Failed to connect to signaling server. Tried ${wsUrls.length} URLs. Please check your connection.`)
+        console.error("❌ All WebSocket URLs failed:", wsUrls)
+        return
+      }
+
+      const wsUrl = wsUrls[currentUrlIndex]
+      console.log(`🔗 Trying WebSocket URL ${currentUrlIndex + 1}/${wsUrls.length}: ${wsUrl}`)
+      setCurrentWsUrl(wsUrl)
+
+      try {
+        const ws = new WebSocket(wsUrl)
+        wsRef.current = ws
+
+        const connectionTimeout = setTimeout(() => {
+          if (ws.readyState === WebSocket.CONNECTING) {
+            console.log(`⏰ Connection timeout for ${wsUrl}`)
+            ws.close()
+            currentUrlIndex++
+            setTimeout(tryConnection, 1000) // Wait 1 second before trying next URL
+          }
+        }, 15000) // 15 second timeout
+
+        ws.onopen = () => {
+          clearTimeout(connectionTimeout)
+          console.log(`✅ WebSocket connected to ${wsUrl}`)
+          setWsStatus("connected")
+          setReconnectAttempts(0)
+          setError("")
+
+          // Join session immediately
+          const joinMessage = {
+            type: "join",
+            sessionId,
+            userId: user.id,
+            reconnect: connectionAttempts > 0,
+            timestamp: Date.now(),
+          }
+
+          console.log("📤 Sending join message:", joinMessage)
+          ws.send(JSON.stringify(joinMessage))
+
+          // Start heartbeat
+          startHeartbeat()
+        }
+
+        ws.onmessage = async (event) => {
+          try {
+            const message = JSON.parse(event.data)
+            console.log("📨 Received message:", message.type, message)
+            setLastHeartbeat(new Date())
+            await handleSignalingMessage(message)
+          } catch (error) {
+            console.error("❌ Error parsing message:", error, event.data)
+          }
+        }
+
+        ws.onclose = (event) => {
+          clearTimeout(connectionTimeout)
+          console.log(`🔌 WebSocket closed: ${event.code} ${event.reason}`)
+          setWsStatus("disconnected")
+          stopHeartbeat()
+
+          if (event.code !== 1000 && event.code !== 1001) {
+            // Don't reconnect on normal closure
+            if (currentUrlIndex < wsUrls.length - 1) {
+              // Try next URL
+              currentUrlIndex++
+              setTimeout(tryConnection, 1000)
+            } else {
+              // All URLs failed, schedule reconnect
+              scheduleReconnect()
+            }
+          }
+        }
+
+        ws.onerror = (error) => {
+          clearTimeout(connectionTimeout)
+          console.error(`❌ WebSocket error on ${wsUrl}:`, error)
+
+          // Try next URL immediately
+          currentUrlIndex++
+          setTimeout(tryConnection, 500)
+        }
+      } catch (error) {
+        console.error(`❌ Failed to create WebSocket for ${wsUrl}:`, error)
+        currentUrlIndex++
+        setTimeout(tryConnection, 500)
+      }
+    }
+
+    tryConnection()
+  }, [user, sessionId, reconnectAttempts, connectionAttempts])
+
   const startHeartbeat = () => {
     stopHeartbeat()
     heartbeatIntervalRef.current = setInterval(() => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(
-          JSON.stringify({
-            type: "ping",
-            sessionId,
-            userId: user?.id,
-            timestamp: Date.now(),
-          }),
-        )
+        wsRef.current.send(JSON.stringify({ type: "ping", sessionId, userId: user?.id }))
         SessionManager.extendSession(sessionId)
       }
-    }, 10000) // More frequent heartbeat for better responsiveness
+    }, 30000)
   }
 
   const stopHeartbeat = () => {
@@ -2059,106 +1956,15 @@ export default function SessionPage() {
     }
   }
 
-  // Enhanced P2P heartbeat
-  const startPeerHeartbeat = () => {
-    stopPeerHeartbeat()
-    peerHeartbeatIntervalRef.current = setInterval(() => {
-      if (peerConnectionRef.current?.dataChannel?.readyState === "open") {
-        try {
-          peerConnectionRef.current.dataChannel.send(
-            JSON.stringify({
-              type: "peer-heartbeat",
-              timestamp: Date.now(),
-              stats: connectionStatsRef.current,
-            }),
-          )
-          peerConnectionRef.current.lastActivity = new Date()
-        } catch (error) {
-          console.error("❌ Failed to send peer heartbeat:", error)
-        }
-      }
-    }, 8000) // More frequent peer heartbeat
-  }
-
-  const stopPeerHeartbeat = () => {
-    if (peerHeartbeatIntervalRef.current) {
-      clearInterval(peerHeartbeatIntervalRef.current)
-      peerHeartbeatIntervalRef.current = null
-    }
-  }
-
-  // Connection monitoring and quality assessment
-  const startConnectionMonitor = () => {
-    if (connectionMonitorRef.current) {
-      clearInterval(connectionMonitorRef.current)
-    }
-
-    connectionMonitorRef.current = setInterval(async () => {
-      if (peerConnectionRef.current?.pc) {
-        try {
-          const stats = await peerConnectionRef.current.pc.getStats()
-          let packetsLost = 0
-          let roundTripTime = 0
-          let bytesReceived = 0
-          let bytesSent = 0
-
-          stats.forEach((report) => {
-            if (report.type === "inbound-rtp") {
-              packetsLost += report.packetsLost || 0
-              bytesReceived += report.bytesReceived || 0
-            }
-            if (report.type === "outbound-rtp") {
-              bytesSent += report.bytesSent || 0
-            }
-            if (report.type === "candidate-pair" && report.state === "succeeded") {
-              roundTripTime = report.currentRoundTripTime || 0
-            }
-          })
-
-          connectionStatsRef.current = {
-            packetsLost,
-            roundTripTime,
-            bytesReceived,
-            bytesSent,
-          }
-
-          // Update transfer optimizer with RTT
-          if (roundTripTime > 0) {
-            transferOptimizer.updateRTT(roundTripTime * 1000)
-          }
-
-          // Assess connection quality
-          if (roundTripTime < 0.05 && packetsLost < 2) {
-            setConnectionQuality("excellent")
-          } else if (roundTripTime < 0.15 && packetsLost < 8) {
-            setConnectionQuality("good")
-          } else {
-            setConnectionQuality("poor")
-          }
-
-          // Check for peer heartbeat timeout
-          const timeSinceLastPeerHeartbeat = Date.now() - lastPeerHeartbeatRef.current.getTime()
-          if (timeSinceLastPeerHeartbeat > 20000 && connectionStatus === "connected") {
-            console.warn("⚠️ Peer heartbeat timeout, connection may be unstable")
-          }
-        } catch (error) {
-          console.error("❌ Error getting connection stats:", error)
-        }
-      }
-    }, 3000) // More frequent monitoring
-  }
-
-  //  reconnection with intelligent backoff
-  const scheduleReconnect = useCallback(async () => {
-    if (reconnectAttempts >= 10) {
+  const scheduleReconnect = useCallback(() => {
+    if (reconnectAttempts >= 5) {
       setWsStatus("error")
-      setError("Unable to establish a stable connection. Please refresh the page or check your internet connection.")
+      setError("Maximum reconnection attempts reached. Please refresh the page.")
       return
     }
 
-    // Use shorter delays for faster reconnection
-    const delay = Math.min(500 * Math.pow(1.2, reconnectAttempts), 5000) // Max 5 second delay
-    console.log(`🔄 Scheduling reconnect in ${delay}ms (attempt ${reconnectAttempts + 1}/10)`)
+    const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000)
+    console.log(`🔄 Scheduling reconnect in ${delay}ms (attempt ${reconnectAttempts + 1})`)
 
     reconnectTimeoutRef.current = setTimeout(() => {
       setReconnectAttempts((prev) => prev + 1)
@@ -2177,60 +1983,35 @@ export default function SessionPage() {
     setReconnectAttempts(0)
     setConnectionAttempts((prev) => prev + 1)
     cleanup()
-    setTimeout(connectWebSocket, 500) // Faster manual reconnect
+    setTimeout(connectWebSocket, 1000)
   }
 
-  // Enhanced peer connection reset
+  // Reset P2P connection
   const resetPeerConnection = useCallback(() => {
     console.log("🔄 Resetting peer connection...")
-
-    stopPeerHeartbeat()
-    if (connectionMonitorRef.current) {
-      clearInterval(connectionMonitorRef.current)
-    }
-
     if (peerConnectionRef.current?.pc) {
-      try {
-        if (peerConnectionRef.current.dataChannel) {
-          peerConnectionRef.current.dataChannel.close()
-        }
-        if (peerConnectionRef.current.stabilizer) {
-          peerConnectionRef.current.stabilizer.clearQueue()
-        }
-        peerConnectionRef.current.pc.close()
-      } catch (error) {
-        console.error("Error closing peer connection:", error)
-      }
+      peerConnectionRef.current.pc.close()
     }
-
     setPeerConnection(null)
     peerConnectionRef.current = null
     setConnectionStatus("connecting")
-    setConnectionQuality("unknown")
     iceCandidatesQueue.current = []
-
     if (connectionTimeoutRef.current) {
       clearTimeout(connectionTimeoutRef.current)
     }
   }, [])
 
-  //  WebRTC setup with optimized configuration
+  // WebRTC setup with proper configuration
   const createPeerConnection = useCallback(() => {
-    console.log("🚀 Creating  peer connection")
-
+    console.log("🔗 Creating peer connection")
     const pc = new RTCPeerConnection({
       iceServers: [
         { urls: "stun:stun.l.google.com:19302" },
         { urls: "stun:stun1.l.google.com:19302" },
         { urls: "stun:stun2.l.google.com:19302" },
         { urls: "stun:stun.cloudflare.com:3478" },
-        { urls: "stun:stun.nextcloud.com:443" },
-        { urls: "stun:stun.sipgate.net:3478" },
       ],
-      iceCandidatePoolSize: 15, // Increased for faster connection
-      iceTransportPolicy: "all",
-      bundlePolicy: "max-bundle",
-      rtcpMuxPolicy: "require",
+      iceCandidatePoolSize: 10,
     })
 
     let connectionEstablished = false
@@ -2244,7 +2025,6 @@ export default function SessionPage() {
               type: "ice-candidate",
               sessionId,
               candidate: event.candidate,
-              timestamp: Date.now(),
             }),
           )
         }
@@ -2255,21 +2035,13 @@ export default function SessionPage() {
 
     pc.onconnectionstatechange = () => {
       console.log("🔄 Peer connection state:", pc.connectionState)
-
-      if (peerConnectionRef.current) {
-        peerConnectionRef.current.lastActivity = new Date()
-      }
-
       switch (pc.connectionState) {
         case "connected":
           if (!connectionEstablished) {
-            console.log("✅  P2P connection established!")
+            console.log("✅ P2P connection established!")
             connectionEstablished = true
             setConnectionStatus("connected")
             NotificationManager.showConnectionNotification(true, "peer")
-            startPeerHeartbeat()
-            startConnectionMonitor()
-
             if (connectionTimeoutRef.current) {
               clearTimeout(connectionTimeoutRef.current)
             }
@@ -2280,54 +2052,27 @@ export default function SessionPage() {
           break
         case "disconnected":
           console.log("⚠️ P2P connection disconnected")
-          setConnectionStatus("connecting")
-          stopPeerHeartbeat()
-          NotificationManager.showConnectionNotification(false)
-
-          // Faster ICE restart
-          setTimeout(() => {
-            if (pc.connectionState === "disconnected" && pc.iceConnectionState !== "closed") {
-              console.log("🔄 Attempting fast ICE restart...")
-              try {
+          if (connectionEstablished) {
+            setConnectionStatus("connecting")
+            NotificationManager.showConnectionNotification(false)
+            setTimeout(() => {
+              if (pc.connectionState === "disconnected") {
+                console.log("🔄 Attempting to restart ICE...")
                 pc.restartIce()
-              } catch (error) {
-                console.error("❌ ICE restart failed:", error)
-                setTimeout(() => {
-                  if (connectionStatus !== "connected") {
-                    resetPeerConnection()
-                    setTimeout(() => {
-                      if (isInitiator) {
-                        initiateConnection()
-                      }
-                    }, 1000) // Faster retry
-                  }
-                }, 2000)
               }
-            }
-          }, 1000) // Faster response
+            }, 2000)
+          }
           break
         case "failed":
           console.log("❌ P2P connection failed")
           setConnectionStatus("disconnected")
           connectionEstablished = false
-          stopPeerHeartbeat()
           NotificationManager.showConnectionNotification(false)
-
-          // Faster reconnection attempt
-          setTimeout(() => {
-            resetPeerConnection()
-            setTimeout(() => {
-              if (isInitiator) {
-                initiateConnection()
-              }
-            }, 1500) // Faster retry
-          }, 1000)
           break
         case "closed":
           console.log("🔌 P2P connection closed")
           setConnectionStatus("disconnected")
           connectionEstablished = false
-          stopPeerHeartbeat()
           NotificationManager.showConnectionNotification(false)
           break
       }
@@ -2339,23 +2084,19 @@ export default function SessionPage() {
         case "connected":
         case "completed":
           if (!connectionEstablished) {
-            console.log("✅  ICE connection successful")
+            console.log("✅ ICE connection successful")
           }
           break
         case "disconnected":
-          console.log("⚠️ ICE disconnected, monitoring for reconnection...")
+          console.log("⚠️ ICE disconnected, will attempt to reconnect...")
           break
         case "failed":
-          console.log("❌ ICE connection failed, attempting fast restart...")
+          console.log("❌ ICE connection failed, restarting...")
           setTimeout(() => {
             if (pc.iceConnectionState === "failed") {
-              try {
-                pc.restartIce()
-              } catch (error) {
-                console.error("❌ ICE restart failed:", error)
-              }
+              pc.restartIce()
             }
-          }, 500) // Faster restart
+          }, 1000)
           break
       }
     }
@@ -2366,43 +2107,28 @@ export default function SessionPage() {
       setupDataChannel(channel)
     }
 
-    // Reduced timeout for faster failure detection
+    // Set connection timeout
     connectionTimeoutRef.current = setTimeout(() => {
       if (!connectionEstablished) {
         console.log("⏰ P2P connection timeout")
-        setError("Connection timeout. Retrying automatically...")
-        resetPeerConnection()
-        setTimeout(() => {
-          if (isInitiator) {
-            initiateConnection()
-          }
-        }, 1000) // Faster retry
+        setError("Connection timeout. Click retry to attempt again.")
       }
-    }, 20000) // Reduced timeout
+    }, 30000)
 
     return pc
-  }, [sessionId, isInitiator])
+  }, [sessionId])
 
-  // Enhanced data channel setup with optimization
   const setupDataChannel = (channel: RTCDataChannel) => {
-    console.log("📡 Setting up  data channel:", channel.label, "State:", channel.readyState)
+    console.log("📡 Setting up data channel:", channel.label, "State:", channel.readyState)
     channel.binaryType = "arraybuffer"
 
-    // Create connection stabilizer
-    const stabilizer = new ConnectionStabilizer(channel)
-
     channel.onmessage = (event) => {
-      if (peerConnectionRef.current) {
-        peerConnectionRef.current.lastActivity = new Date()
-      }
       handleDataChannelMessage(event.data)
     }
 
     channel.onopen = () => {
-      console.log("📡  data channel opened - ready for lightning-speed transfer!")
+      console.log("📡 Data channel opened - ready for file transfer!")
       setConnectionStatus("connected")
-      startPeerHeartbeat()
-
       if (connectionTimeoutRef.current) {
         clearTimeout(connectionTimeoutRef.current)
       }
@@ -2411,20 +2137,11 @@ export default function SessionPage() {
         channel.send(
           JSON.stringify({
             type: "connection-test",
-            message: " data channel ready",
+            message: "Data channel ready",
             timestamp: Date.now(),
-            capabilities: {
-              maxFileSize: "1GB",
-              chunking: true,
-              compression: compressionEnabled,
-              encryption: "browser-native",
-              optimization: "",
-              concurrentChunks: transferOptimizer.getConcurrentChunks(),
-              chunkSize: transferOptimizer.getOptimalChunkSize(),
-            },
           }),
         )
-        console.log("📤 Sent  connection test message")
+        console.log("📤 Sent connection test message")
       } catch (error) {
         console.error("❌ Failed to send test message:", error)
       }
@@ -2433,18 +2150,15 @@ export default function SessionPage() {
     channel.onclose = () => {
       console.log("📡 Data channel closed")
       setConnectionStatus("disconnected")
-      stopPeerHeartbeat()
     }
 
     channel.onerror = (error) => {
       console.error("❌ Data channel error:", error)
       setConnectionStatus("disconnected")
-      stopPeerHeartbeat()
     }
 
     if (peerConnectionRef.current) {
       peerConnectionRef.current.dataChannel = channel
-      peerConnectionRef.current.stabilizer = stabilizer
     }
   }
 
@@ -2471,8 +2185,8 @@ export default function SessionPage() {
         console.log(`👤 Another user joined! User count: ${message.userCount}`)
         setUserCount(message.userCount)
         if (isInitiator && message.userCount === 2) {
-          console.log("🚀 Initiating  WebRTC connection as initiator")
-          setTimeout(() => initiateConnection(), 1000) // Faster initiation
+          console.log("🚀 Initiating WebRTC connection as initiator")
+          setTimeout(() => initiateConnection(), 1500)
         }
         break
       case "user-reconnected":
@@ -2484,7 +2198,7 @@ export default function SessionPage() {
             if (isInitiator) {
               initiateConnection()
             }
-          }, 1500) // Faster reconnection
+          }, 2000)
         }
         break
       case "retry-connection":
@@ -2494,7 +2208,7 @@ export default function SessionPage() {
           if (isInitiator) {
             initiateConnection()
           }
-        }, 1000) // Faster retry
+        }, 1000)
         break
       case "offer":
         console.log("📨 Received offer, creating answer")
@@ -2523,39 +2237,27 @@ export default function SessionPage() {
 
   const initiateConnection = async () => {
     try {
-      console.log("🚀 Initiating  connection as initiator")
+      console.log("🔗 Initiating connection as initiator")
       if (peerConnectionRef.current?.pc) {
         peerConnectionRef.current.pc.close()
       }
 
       const pc = createPeerConnection()
 
-      //  data channel configuration
       const dataChannel = pc.createDataChannel("fileTransfer", {
-        ordered: false, // Allow out-of-order delivery for maximum speed
-        maxRetransmits: 2, // Reduced retransmits for speed
-        maxPacketLifeTime: 5000, // Reduced timeout for faster failure detection
+        ordered: true,
+        maxRetransmits: 3,
       })
 
-      console.log("📡 Created  data channel:", dataChannel.label)
+      console.log("📡 Created data channel:", dataChannel.label)
       setupDataChannel(dataChannel)
 
-      const connection: PeerConnection = {
-        pc,
-        dataChannel,
-        connected: false,
-        lastActivity: new Date(),
-        reconnectAttempts: 0,
-      }
+      const connection = { pc, dataChannel, connected: false }
       setPeerConnection(connection)
       peerConnectionRef.current = connection
 
-      console.log("📤 Creating  offer...")
-      const offer = await pc.createOffer({
-        offerToReceiveAudio: false,
-        offerToReceiveVideo: false,
-      })
-
+      console.log("📤 Creating offer...")
+      const offer = await pc.createOffer()
       console.log("📤 Setting local description...")
       await pc.setLocalDescription(offer)
 
@@ -2587,12 +2289,7 @@ export default function SessionPage() {
       }
 
       const pc = createPeerConnection()
-      const connection: PeerConnection = {
-        pc,
-        connected: false,
-        lastActivity: new Date(),
-        reconnectAttempts: 0,
-      }
+      const connection = { pc, connected: false }
       setPeerConnection(connection)
       peerConnectionRef.current = connection
 
@@ -2667,7 +2364,7 @@ export default function SessionPage() {
             if (!isInitiator) {
               console.log("🔄 Non-initiator waiting for new offer...")
             }
-          }, 1000) // Faster retry
+          }, 1000)
         }
       }
     } catch (error) {
@@ -2700,51 +2397,18 @@ export default function SessionPage() {
     return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("")
   }
 
-  // Enhanced data channel message handler with optimization
-  const handleDataChannelMessage = async (data: ArrayBuffer | string) => {
+  // Enhanced data channel message handler with chat support
+  const handleDataChannelMessage = (data: ArrayBuffer | string) => {
     if (typeof data === "string") {
       const message = JSON.parse(data)
-
-      // Handle peer heartbeat
-      if (message.type === "peer-heartbeat") {
-        lastPeerHeartbeatRef.current = new Date()
-        if (peerConnectionRef.current?.dataChannel?.readyState === "open") {
-          try {
-            peerConnectionRef.current.dataChannel.send(
-              JSON.stringify({
-                type: "peer-heartbeat-response",
-                timestamp: Date.now(),
-              }),
-            )
-          } catch (error) {
-            console.error("❌ Failed to send heartbeat response:", error)
-          }
-        }
-        return
-      }
-
-      if (message.type === "peer-heartbeat-response") {
-        lastPeerHeartbeatRef.current = new Date()
-        return
-      }
-
       if (message.type === "connection-test") {
         console.log("📨 Received connection test:", message.message)
         if (peerConnectionRef.current?.dataChannel?.readyState === "open") {
           peerConnectionRef.current.dataChannel.send(
             JSON.stringify({
               type: "connection-ack",
-              message: " connection confirmed",
+              message: "Connection confirmed",
               timestamp: Date.now(),
-              capabilities: {
-                maxFileSize: "1GB",
-                chunking: true,
-                compression: compressionEnabled,
-                encryption: "browser-native",
-                optimization: "",
-                concurrentChunks: transferOptimizer.getConcurrentChunks(),
-                chunkSize: transferOptimizer.getOptimalChunkSize(),
-              },
             }),
           )
         }
@@ -2752,7 +2416,7 @@ export default function SessionPage() {
       }
 
       if (message.type === "connection-ack") {
-        console.log("✅  connection acknowledged by peer")
+        console.log("✅ Connection acknowledged by peer")
         return
       }
 
@@ -2770,9 +2434,7 @@ export default function SessionPage() {
       }
 
       if (message.type === "file-start") {
-        console.log("📥 Starting  file reception:", message.fileName)
-        const totalChunks = Math.ceil(message.fileSize / transferOptimizer.getOptimalChunkSize())
-
+        console.log("📥 Starting file reception:", message.fileName)
         const transfer: FileTransfer = {
           id: message.fileId,
           name: message.fileName,
@@ -2782,110 +2444,46 @@ export default function SessionPage() {
           status: "transferring",
           direction: "receiving",
           checksum: message.checksum,
-          startTime: Date.now(),
-          compressionRatio: message.compressionRatio || 1,
         }
         setFileTransfers((prev) => [...prev, transfer])
-
         receivedChunksRef.current.set(message.fileId, {
-          chunks: new Map(),
-          totalChunks,
-          receivedChunks: 0,
+          chunks: [],
+          totalSize: message.fileSize,
           fileName: message.fileName,
           fileType: message.fileType,
           checksum: message.checksum,
-          isCompressed: message.isCompressed || false,
         })
       } else if (message.type === "file-end") {
-        console.log("📥  file reception complete:", message.fileId)
+        console.log("📥 File reception complete:", message.fileId)
         const fileData = receivedChunksRef.current.get(message.fileId)
         if (fileData) {
-          // Reconstruct file from chunks
-          const sortedChunks = Array.from(fileData.chunks.entries())
-            .sort(([a], [b]) => a - b)
-            .map(([_, chunk]) => chunk)
-
-          let blob = new Blob(sortedChunks, { type: fileData.fileType })
-
-          // Decompress if needed
-          if (fileData.isCompressed && compressionEnabled) {
-            console.log("🗜️ Decompressing received file...")
-            try {
-              const decompressed = await CompressionUtils.decompress(new Uint8Array(await blob.arrayBuffer()))
-              blob = new Blob([decompressed], { type: fileData.fileType })
-              if (fileData.checksum) {
-                verifyAndDownloadFile(blob, fileData.fileName, fileData.checksum, message.fileId)
-              } else {
-                downloadFile(blob, fileData.fileName)
-                setFileTransfers((prev) =>
-                  prev.map((t) => (t.id === message.fileId ? { ...t, status: "completed", progress: 100 } : t)),
-                )
-              }
-            } catch (error) {
-              console.error("❌ Decompression failed:", error)
-              setFileTransfers((prev) => prev.map((t) => (t.id === message.fileId ? { ...t, status: "error" } : t)))
-            }
+          const blob = new Blob(fileData.chunks, { type: fileData.fileType })
+          if (fileData.checksum) {
+            verifyAndDownloadFile(blob, fileData.fileName, fileData.checksum, message.fileId)
           } else {
-            if (fileData.checksum) {
-              verifyAndDownloadFile(blob, fileData.fileName, fileData.checksum, message.fileId)
-            } else {
-              downloadFile(blob, fileData.fileName)
-              setFileTransfers((prev) =>
-                prev.map((t) => (t.id === message.fileId ? { ...t, status: "completed", progress: 100 } : t)),
-              )
-            }
+            downloadFile(blob, fileData.fileName)
+            setFileTransfers((prev) =>
+              prev.map((t) => (t.id === message.fileId ? { ...t, status: "completed", progress: 100 } : t)),
+            )
           }
           receivedChunksRef.current.delete(message.fileId)
         }
-      } else if (message.type === "chunk-ack") {
-        // Handle chunk acknowledgment for reliability
-        const transfer = fileTransfers.find((t) => t.id === message.fileId && t.direction === "sending")
-        if (transfer?.chunkManager) {
-          transfer.chunkManager.markCompleted(message.chunkId)
-        }
       }
     } else {
-      // Binary data (file chunk) -  handling
+      // Binary data (file chunk)
       const view = new DataView(data)
       const fileIdLength = view.getUint32(0)
-      const chunkId = view.getUint32(4)
-      const fileId = new TextDecoder().decode(data.slice(8, 8 + fileIdLength))
-      const chunkData = data.slice(8 + fileIdLength)
+      const fileId = new TextDecoder().decode(data.slice(4, 4 + fileIdLength))
+      const chunkData = data.slice(4 + fileIdLength)
 
       const fileData = receivedChunksRef.current.get(fileId)
       if (fileData) {
-        fileData.chunks.set(chunkId, chunkData)
-        fileData.receivedChunks++
+        fileData.chunks.push(chunkData)
+        const receivedSize = fileData.chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0)
+        const progress = Math.round((receivedSize / fileData.totalSize) * 100)
+        setFileTransfers((prev) => prev.map((t) => (t.id === fileId ? { ...t, progress } : t)))
 
-        const progress = Math.round((fileData.receivedChunks / fileData.totalChunks) * 100)
-        setFileTransfers((prev) =>
-          prev.map((t) => {
-            if (t.id === fileId) {
-              const elapsed = Date.now() - (t.startTime || Date.now())
-              const speed = (fileData.receivedChunks * transferOptimizer.getOptimalChunkSize()) / (elapsed / 1000)
-              return { ...t, progress, transferStats: { ...transferOptimizer.getStats(), speed } }
-            }
-            return t
-          }),
-        )
-
-        // Send acknowledgment for reliability
-        if (peerConnectionRef.current?.dataChannel?.readyState === "open") {
-          try {
-            peerConnectionRef.current.dataChannel.send(
-              JSON.stringify({
-                type: "chunk-ack",
-                fileId,
-                chunkId,
-                timestamp: Date.now(),
-              }),
-            )
-          } catch (error) {
-            console.error("❌ Failed to send chunk ack:", error)
-          }
-        }
-
-        setCurrentSpeed(transferOptimizer.getStats().speed)
+        setCurrentSpeed(speedThrottleRef.current.getCurrentSpeed())
       }
     }
   }
@@ -2972,18 +2570,18 @@ export default function SessionPage() {
     return null
   }
 
-  //  file sending with parallel chunks and adaptive parameters
+  // Enhanced file sending with AI scanning and preview - now supports multiple files
   const sendFiles = async (files: File[]) => {
     if (!peerConnection?.dataChannel || peerConnection.dataChannel.readyState !== "open") {
       setError("Data channel not ready for file transfer")
       return
     }
 
-    console.log(`📤 Starting  batch file transfer: ${files.length} files`)
+    console.log(`📤 Starting batch file transfer: ${files.length} files`)
 
     for (const file of files) {
       await sendSingleFile(file)
-      await new Promise((resolve) => setTimeout(resolve, 50)) // Minimal delay for  transfers
+      await new Promise((resolve) => setTimeout(resolve, 100))
     }
   }
 
@@ -2996,7 +2594,6 @@ export default function SessionPage() {
 
     try {
       const fileId = Math.random().toString(36).substring(2, 15)
-      const startTime = Date.now()
 
       const transfer: FileTransfer = {
         id: fileId,
@@ -3006,12 +2603,10 @@ export default function SessionPage() {
         progress: 0,
         status: "scanning",
         direction: "sending",
-        startTime,
       }
 
       setFileTransfers((prev) => [...prev, transfer])
 
-      // AI scanning
       const scanner = getAIScanner()
       if (scanner) {
         console.log("🔍 Scanning file with AI:", file.name)
@@ -3026,47 +2621,11 @@ export default function SessionPage() {
         }
       }
 
-      // Calculate checksum and prepare for compression
       const checksum = await calculateChecksum(file)
-      let fileData = new Uint8Array(await file.arrayBuffer())
-      let isCompressed = false
-      let compressionRatio = 1
 
-      // Compress if beneficial and supported
-      if (compressionEnabled && CompressionUtils.shouldCompress(fileData)) {
-        console.log("🗜️ Compressing file for  transfer...")
-        const compressed = await CompressionUtils.compress(fileData)
-        if (compressed.length < fileData.length * 0.9) {
-          // Only use if >10% reduction
-          compressionRatio = fileData.length / compressed.length
-          fileData = new Uint8Array(compressed)
-          isCompressed = true
-          console.log(`🗜️ Compression ratio: ${compressionRatio.toFixed(2)}x`)
-        }
-      }
+      setFileTransfers((prev) => prev.map((t) => (t.id === fileId ? { ...t, checksum, status: "transferring" } : t)))
 
-      // Initialize transfer optimizer for this file
-      transferOptimizer.reset(fileData.length)
-      const chunkSize = transferOptimizer.getOptimalChunkSize()
-      const chunkManager = new ChunkManager(fileData.length, chunkSize)
-
-      setFileTransfers((prev) =>
-        prev.map((t) =>
-          t.id === fileId
-            ? {
-                ...t,
-                checksum,
-                status: "transferring",
-                chunkManager,
-                compressionRatio: isCompressed ? compressionRatio : undefined,
-              }
-            : t,
-        ),
-      )
-
-      console.log(
-        `📤 Starting  file transfer: ${file.name}, Size: ${fileData.length}, Chunks: ${Math.ceil(fileData.length / chunkSize)}, Compressed: ${isCompressed}`,
-      )
+      console.log("📤 Starting file transfer:", file.name, "Size:", file.size, "ID:", fileId)
 
       if (!peerConnection?.dataChannel || peerConnection.dataChannel.readyState !== "open") {
         setError("Data channel not ready for file transfer")
@@ -3074,7 +2633,6 @@ export default function SessionPage() {
         return
       }
 
-      // Send file start message
       peerConnection.dataChannel.send(
         JSON.stringify({
           type: "file-start",
@@ -3083,26 +2641,52 @@ export default function SessionPage() {
           fileSize: file.size,
           fileType: file.type,
           checksum,
-          isCompressed,
-          compressionRatio: isCompressed ? compressionRatio : undefined,
         }),
       )
 
-      //  parallel chunk sending
+      const chunkSize = 16384
+      const reader = new FileReader()
+      let offset = 0
       let isTransferring = true
-      let completedChunks = 0
-      const totalChunks = Math.ceil(fileData.length / chunkSize)
-      const concurrentLimit = transferOptimizer.getConcurrentChunks()
-      let activeSends = 0
 
-      const sendNextChunks = async () => {
-        while (isTransferring && activeSends < concurrentLimit) {
-          const chunks = chunkManager.getNextChunks(concurrentLimit - activeSends)
-          if (chunks.length === 0) {
-            if (activeSends === 0 && chunkManager.isComplete()) {
-              // All chunks sent successfully
-              console.log("📤  file transfer complete:", file.name)
-              peerConnection?.dataChannel?.send(
+      const sendChunk = async () => {
+        if (!isTransferring || !peerConnection?.dataChannel || peerConnection.dataChannel.readyState !== "open") {
+          console.log("❌ Transfer stopped - data channel not ready")
+          setFileTransfers((prev) => prev.map((t) => (t.id === fileId ? { ...t, status: "error" } : t)))
+          return
+        }
+
+        const slice = file.slice(offset, offset + chunkSize)
+        reader.readAsArrayBuffer(slice)
+      }
+
+      reader.onload = async (e) => {
+        if (!isTransferring || !e.target?.result) return
+
+        const chunk = e.target.result as ArrayBuffer
+
+        await speedThrottleRef.current.throttle(chunk.byteLength)
+
+        const fileIdBytes = new TextEncoder().encode(fileId)
+        const message = new ArrayBuffer(4 + fileIdBytes.length + chunk.byteLength)
+        const view = new DataView(message)
+        view.setUint32(0, fileIdBytes.length)
+        new Uint8Array(message, 4, fileIdBytes.length).set(fileIdBytes)
+        new Uint8Array(message, 4 + fileIdBytes.length).set(new Uint8Array(chunk))
+
+        try {
+          if (peerConnection?.dataChannel?.readyState === "open") {
+            peerConnection.dataChannel.send(message)
+            offset += chunkSize
+            const progress = Math.min(Math.round((offset / file.size) * 100), 100)
+            setFileTransfers((prev) => prev.map((t) => (t.id === fileId ? { ...t, progress } : t)))
+            setCurrentSpeed(speedThrottleRef.current.getCurrentSpeed())
+
+            if (offset < file.size) {
+              setTimeout(sendChunk, 10)
+            } else {
+              console.log("📤 File transfer complete:", file.name)
+              peerConnection.dataChannel.send(
                 JSON.stringify({
                   type: "file-end",
                   fileId,
@@ -3114,122 +2698,31 @@ export default function SessionPage() {
               NotificationManager.showFileNotification(file.name, true)
               isTransferring = false
             }
-            break
+          } else {
+            throw new Error("Data channel not open")
           }
-
-          for (const chunk of chunks) {
-            activeSends++
-            sendChunk(chunk, fileData, chunkSize)
-              .then(() => {
-                activeSends--
-                completedChunks++
-                chunkManager.markCompleted(chunk.id)
-
-                const progress = Math.round((completedChunks / totalChunks) * 100)
-                const elapsed = Date.now() - startTime
-                const speed = (completedChunks * chunkSize) / (elapsed / 1000)
-
-                transferOptimizer.reportSuccessfulTransmission(chunkSize, elapsed / completedChunks)
-
-                setFileTransfers((prev) =>
-                  prev.map((t) => {
-                    if (t.id === fileId) {
-                      return {
-                        ...t,
-                        progress,
-                        transferStats: { ...transferOptimizer.getStats(), speed },
-                      }
-                    }
-                    return t
-                  }),
-                )
-
-                setCurrentSpeed(speed)
-                sendNextChunks() // Continue sending
-              })
-              .catch((error) => {
-                activeSends--
-                console.error("❌ Chunk send failed:", error)
-                chunkManager.markFailed(chunk.id)
-                transferOptimizer.reportPacketLoss(1, 1)
-
-                // Retry failed chunks
-                setTimeout(() => sendNextChunks(), 500) // Faster retry
-              })
-          }
+        } catch (error) {
+          console.error("❌ Error sending chunk:", error)
+          setFileTransfers((prev) => prev.map((t) => (t.id === fileId ? { ...t, status: "error" } : t)))
+          setError("File transfer failed: " + (error as Error).message)
+          NotificationManager.showFileNotification(file.name, false, (error as Error).message)
+          isTransferring = false
         }
       }
 
-      // Start sending chunks
-      sendNextChunks()
+      reader.onerror = () => {
+        console.error("❌ Error reading file")
+        setFileTransfers((prev) => prev.map((t) => (t.id === fileId ? { ...t, status: "error" } : t)))
+        setError("Failed to read file")
+        NotificationManager.showFileNotification(file.name, false, "Failed to read file")
+        isTransferring = false
+      }
 
-      // Monitor for stale chunks and failed transfers
-      const monitorInterval = setInterval(() => {
-        if (!isTransferring) {
-          clearInterval(monitorInterval)
-          return
-        }
-
-        const staleCount = chunkManager.timeoutStaleChunks(15000) // Reduced timeout for faster detection
-        if (staleCount > 0) {
-          console.log(`⚠️ ${staleCount} chunks timed out, retrying...`)
-          sendNextChunks()
-        }
-
-        const failedChunks = chunkManager.getFailedChunks()
-        if (failedChunks.length > totalChunks * 0.1) {
-          // More than 10% failed
-          console.error("❌ Too many failed chunks, aborting transfer")
-          isTransferring = false
-          setFileTransfers((prev) => prev.map((t) => (t.id === fileId ? { ...t, status: "error" } : t)))
-          setError("File transfer failed due to too many errors")
-          NotificationManager.showFileNotification(file.name, false, "Transfer failed")
-        }
-      }, 2000) // More frequent monitoring
+      sendChunk()
     } catch (error) {
       console.error("❌ Error preparing file:", error)
       setError("Failed to prepare file for transfer: " + (error as Error).message)
     }
-  }
-
-  const sendChunk = async (chunk: any, fileData: Uint8Array, chunkSize: number): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      if (!peerConnectionRef.current?.dataChannel || peerConnectionRef.current.dataChannel.readyState !== "open") {
-        reject(new Error("Data channel not ready"))
-        return
-      }
-
-      const start = chunk.id * chunkSize
-      const end = Math.min(start + chunkSize, fileData.length)
-      const chunkData = fileData.slice(start, end)
-
-      // Create  message format
-      const fileIdBytes = new TextEncoder().encode(chunk.id.toString())
-      const message = new ArrayBuffer(8 + fileIdBytes.length + chunkData.length)
-      const view = new DataView(message)
-
-      view.setUint32(0, fileIdBytes.length)
-      view.setUint32(4, chunk.id)
-      new Uint8Array(message, 8, fileIdBytes.length).set(fileIdBytes)
-      new Uint8Array(message, 8 + fileIdBytes.length).set(chunkData)
-
-      try {
-        if (peerConnectionRef.current.stabilizer) {
-          peerConnectionRef.current.stabilizer.sendData(message).then((success) => {
-            if (success) {
-              resolve()
-            } else {
-              reject(new Error("Failed to queue chunk"))
-            }
-          })
-        } else {
-          peerConnectionRef.current.dataChannel.send(message)
-          resolve()
-        }
-      } catch (error) {
-        reject(error)
-      }
-    })
   }
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -3247,6 +2740,7 @@ export default function SessionPage() {
       console.log("📱 No files selected")
     }
 
+    // Reset the input value to allow selecting the same files again
     e.target.value = ""
   }
 
@@ -3293,12 +2787,14 @@ export default function SessionPage() {
     SessionManager.extendSession(sessionId)
   }
 
-  // Mobile-specific touch handlers
+  // Mobile-specific touch handlers - FIXED
   const handleTouchStart = (e: React.TouchEvent) => {
+    // Don't prevent default - let normal touch behavior work
     setDragOver(true)
   }
 
   const handleTouchEnd = (e: React.TouchEvent) => {
+    // Don't prevent default - let normal touch behavior work
     setDragOver(false)
   }
 
@@ -3318,26 +2814,6 @@ export default function SessionPage() {
     return `${minutes}:${seconds.toString().padStart(2, "0")}`
   }
 
-  const getConnectionQualityColor = () => {
-    switch (connectionQuality) {
-      case "excellent":
-        return "bg-green-400"
-      case "good":
-        return "bg-yellow-400"
-      case "poor":
-        return "bg-red-400"
-      default:
-        return "bg-gray-400"
-    }
-  }
-
-  const formatSpeed = (bytesPerSecond: number): string => {
-    if (bytesPerSecond < 1024) return `${bytesPerSecond.toFixed(0)} B/s`
-    if (bytesPerSecond < 1024 * 1024) return `${(bytesPerSecond / 1024).toFixed(1)} KB/s`
-    if (bytesPerSecond < 1024 * 1024 * 1024) return `${(bytesPerSecond / (1024 * 1024)).toFixed(1)} MB/s`
-    return `${(bytesPerSecond / (1024 * 1024 * 1024)).toFixed(1)} GB/s`
-  }
-
   if (!user) {
     router.push("/")
     return null
@@ -3355,7 +2831,7 @@ export default function SessionPage() {
               }`}
             >
               {wsStatus === "connected" ? (
-                <Signal className="w-3 md:w-5 h-3 md:h-5" />
+                <Wifi className="w-3 md:w-5 h-3 md:h-5" />
               ) : (
                 <WifiOff className="w-3 md:w-5 h-3 md:h-5" />
               )}
@@ -3374,7 +2850,7 @@ export default function SessionPage() {
               }`}
             >
               {connectionStatus === "connected" ? (
-                <Zap className="w-3 md:w-5 h-3 md:h-5" />
+                <Users className="w-3 md:w-5 h-3 md:h-5" />
               ) : (
                 <WifiOff className="w-3 md:w-5 h-3 md:h-5" />
               )}
@@ -3386,28 +2862,16 @@ export default function SessionPage() {
               {userCount}/2
             </div>
 
-
-            {/* Speed Indicator */}
-            {currentSpeed > 0 && (
-              <div className="flex items-center gap-1 md:gap-2 px-2 md:px-4 py-1 md:py-2 border-2 md:border-4 border-black font-black bg-orange-400 text-xs md:text-sm">
-                <Zap className="w-3 md:w-5 h-3 md:h-5" />
-                {formatSpeed(currentSpeed)}
-              </div>
-            )}
-
             <div className="flex items-center gap-1 md:gap-2 px-2 md:px-4 py-1 md:py-2 border-2 md:border-4 border-black font-black bg-purple-400 text-xs md:text-sm">
               <Shield className="w-3 md:w-5 h-3 md:h-5" />
               {isMobile ? <Smartphone className="w-3 h-3" /> : <Monitor className="w-3 h-3" />}
-              {/* {compressionEnabled && <span className="ml-1">🗜️</span>} */}
             </div>
           </div>
 
-          {/* Connection stats for debugging */}
-          {process.env.NODE_ENV === "development" && connectionStats && (
+          {/* Debug info for connection troubleshooting */}
+          {process.env.NODE_ENV === "development" && (
             <div className="mt-2 text-xs text-gray-600">
-              Healthy endpoints: {connectionStats.healthyEndpoints}/{connectionStats.totalEndpoints} | Current:{" "}
-              {connectionStats.currentEndpoint} | Pool: {connectionStats.poolSize} | RTT:{" "}
-              {connectionStatsRef.current.roundTripTime.toFixed(3)}ms
+              Current WS URL: {currentWsUrl} | Attempts: {reconnectAttempts}
             </div>
           )}
         </header>
@@ -3424,7 +2888,7 @@ export default function SessionPage() {
                   className="neubrutalism-button bg-blue-500 text-white text-xs md:text-sm"
                 >
                   <RefreshCw className="w-3 md:w-4 h-3 md:h-4 mr-1" />
-                   RECONNECT
+                  RECONNECT
                 </Button>
               )}
               <Button onClick={() => setError("")} variant="ghost" size="sm" className="touch-target">
@@ -3440,10 +2904,10 @@ export default function SessionPage() {
             <Card className="neubrutalism-card bg-yellow-300">
               <CardHeader className="pb-3 md:pb-6">
                 <CardTitle className="text-lg md:text-2xl font-black flex items-center gap-2">
-                  <Zap className="w-5 md:w-6 h-5 md:h-6" />  FILE TRANSFER
+                  <Upload className="w-5 md:w-6 h-5 md:h-6" />
+                  SEND FILES
                   {getAIScanner() && <Scan className="w-4 h-4 text-green-600" {...{ title: "AI Scanning Enabled" }} />}
                   <Files className="w-4 h-4 text-blue-600" />
-                  {compressionEnabled && <span className="text-sm">🗜️ COMPRESSION</span>}
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -3460,21 +2924,23 @@ export default function SessionPage() {
                   onTouchStart={handleTouchStart}
                   onTouchEnd={handleTouchEnd}
                   onClick={() => {
+                    // On mobile, clicking the zone should also trigger file selection
                     if (isMobile && connectionStatus === "connected") {
                       fileInputRef.current?.click()
                     }
                   }}
                 >
-                  <Zap className="w-12 md:w-16 h-12 md:h-16 mx-auto mb-4 text-orange-500" />
+                  <Upload className="w-12 md:w-16 h-12 md:h-16 mx-auto mb-4" />
                   <p className="text-lg md:text-xl font-black mb-2">
                     {connectionStatus === "connected"
                       ? isMobile
-                        ? " TAP FOR LIGHTNING-FAST TRANSFER"
-                        : " DROP FILES FOR LIGHTNING-FAST TRANSFER"
-                      : "WAITING FOR  CONNECTION..."}
+                        ? "TAP HERE TO SELECT FILES"
+                        : "DROP FILES HERE"
+                      : "WAITING FOR CONNECTION..."}
                   </p>
                   {!isMobile && <p className="font-bold mb-4">or</p>}
 
+                  {/* Mobile-friendly file input */}
                   <div className="relative">
                     <Button
                       onClick={(e) => {
@@ -3485,9 +2951,10 @@ export default function SessionPage() {
                       className="neubrutalism-button bg-blue-500 text-white hover:bg-white hover:text-blue-500 touch-target"
                       type="button"
                     >
-                       CHOOSE FILES
+                      CHOOSE FILES
                     </Button>
 
+                    {/* Enhanced mobile file input */}
                     <input
                       ref={fileInputRef}
                       type="file"
@@ -3500,42 +2967,34 @@ export default function SessionPage() {
                   </div>
 
                   <p className="text-xs md:text-sm font-bold mt-4 text-gray-600">
-                    Max 1GB per file •  10x faster •  parallel chunks • Smart compression • AI Scanned •
-                    SHA-256 verified
+                    Max 1GB per file • Multi-file support • AI Scanned • SHA-256 verified
                   </p>
-
-                  {connectionStatus === "connected" && (
-                    <div className="mt-2 text-xs text-green-700 font-bold">
-                       : {transferOptimizer.getConcurrentChunks()} parallel chunks •{" "}
-                      {(transferOptimizer.getOptimalChunkSize() / 1024).toFixed(0)}KB chunks
-                      {compressionEnabled && " • Smart compression"}
-                    </div>
-                  )}
                 </div>
               </CardContent>
             </Card>
           </div>
 
           {/* Mobile-specific file selection alternative */}
-          {isMobile && connectionStatus === "connected" && (
+            {/* Mobile-specific file selection alternative */}
+            {/* {isMobile && connectionStatus === "connected" && (
             <div className="mt-4 p-4 bg-blue-100 border-2 border-blue-400 rounded">
-              <p className="text-sm font-bold mb-2">📱 Mobile  Transfer:</p>
+              <p className="text-sm font-bold mb-2">📱 Mobile File Selection:</p>
               <label
-                htmlFor="mobile-file-input"
-                className="block w-full p-3 bg-blue-500 text-white font-bold text-center border-2 border-black cursor-pointer hover:bg-blue-600"
+              htmlFor="mobile-file-input"
+              className="block w-full p-3 bg-blue-500 text-white font-bold text-center border-2 border-black cursor-pointer hover:bg-blue-600"
               >
-                 SELECT FILES FOR LIGHTNING-FAST TRANSFER
+              📁 SELECT FILES FROM DEVICE
               </label>
               <input
-                id="mobile-file-input"
-                type="file"
-                multiple
-                onChange={handleFileSelect}
-                className="hidden"
-                accept="*/*"
+              id="mobile-file-input"
+              type="file"
+              multiple
+              onChange={handleFileSelect}
+              className="hidden"
+              accept="*//*"
               />
             </div>
-          )}
+            )} */}
 
           {/* Row 2: Chat (2/3) + Connection Status (1/3) */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
@@ -3556,7 +3015,8 @@ export default function SessionPage() {
               <Card className="neubrutalism-card bg-blue-300 h-full">
                 <CardHeader className="pb-3 md:pb-6">
                   <CardTitle className="text-lg md:text-2xl font-black flex items-center gap-2">
-                    <Zap className="w-5 md:w-6 h-5 md:h-6" />  CONNECTION
+                    <Users className="w-5 md:w-6 h-5 md:h-6" />
+                    CONNECTION STATUS
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -3564,13 +3024,9 @@ export default function SessionPage() {
                     {wsStatus === "connecting" && (
                       <div className="bg-yellow-200 p-4 md:p-6 border-4 border-black">
                         <div className="animate-spin w-6 md:w-8 h-6 md:h-8 border-4 border-black border-t-transparent rounded-full mx-auto mb-4 mobile-spinner"></div>
-                        <p className="font-black text-base md:text-lg"> CONNECTING ...</p>
-                        <p className="font-bold text-sm md:text-base">Establishing lightning-fast signaling</p>
-                        {connectionStats && (
-                          <p className="text-xs mt-2 text-gray-600">
-                            Trying {connectionStats.healthyEndpoints} healthy endpoints...
-                          </p>
-                        )}
+                        <p className="font-black text-base md:text-lg">CONNECTING TO SERVER...</p>
+                        <p className="font-bold text-sm md:text-base">Establishing signaling connection</p>
+                        {currentWsUrl && <p className="text-xs mt-2 text-gray-600 break-all">Trying: {currentWsUrl}</p>}
                       </div>
                     )}
                     {wsStatus === "connected" && userCount < 2 && (
@@ -3584,10 +3040,10 @@ export default function SessionPage() {
                     {wsStatus === "connected" && userCount === 2 && connectionStatus === "connecting" && (
                       <div className="bg-orange-200 p-4 md:p-6 border-4 border-black">
                         <div className="animate-spin w-6 md:w-8 h-6 md:h-8 border-4 border-black border-t-transparent rounded-full mx-auto mb-4 mobile-spinner"></div>
-                        <p className="font-black text-base md:text-lg"> ESTABLISHING  P2P...</p>
-                        <p className="font-bold text-sm md:text-base">Setting up lightning-speed direct connection</p>
+                        <p className="font-black text-base md:text-lg">ESTABLISHING P2P...</p>
+                        <p className="font-bold text-sm md:text-base">Setting up direct connection</p>
                         <p className="text-xs md:text-sm mt-2">
-                          {isInitiator ? "Initiating  connection..." : "Waiting for  connection..."}
+                          {isInitiator ? "Initiating connection..." : "Waiting for connection..."}
                         </p>
                         <Button
                           onClick={() => {
@@ -3601,28 +3057,17 @@ export default function SessionPage() {
                           className="neubrutalism-button bg-orange-500 text-white mt-4 touch-target"
                           size="sm"
                         >
-                          <RefreshCw className="w-3 md:w-4 h-3 md:h-4 mr-1" /> RETRY
+                          <RefreshCw className="w-3 md:w-4 h-3 md:h-4 mr-1" />
+                          RETRY
                         </Button>
                       </div>
                     )}
                     {connectionStatus === "connected" && (
                       <div className="bg-green-200 p-4 md:p-6 border-4 border-black">
-                        <Zap className="w-10 md:w-12 h-10 md:h-12 mx-auto mb-4 text-green-600" />
-                        <p className="font-black text-base md:text-lg text-green-800">
-                            CONNECTION ACTIVE!
-                        </p>
-                        <p className="font-bold text-sm md:text-base">Ready for lightning-speed transfer & chat</p>
-                        <p className="text-xs md:text-sm mt-2">
-                            P2P • {transferOptimizer.getConcurrentChunks()} parallel • Quality:{" "}
-                          {connectionQuality}
-                          {compressionEnabled && " • Smart compression"}
-                        </p>
-                        {connectionStatsRef.current.roundTripTime > 0 && (
-                          <p className="text-xs mt-1">RTT: {connectionStatsRef.current.roundTripTime.toFixed(3)}ms</p>
-                        )}
-                        {currentSpeed > 0 && (
-                          <p className="text-xs mt-1 font-bold text-green-700"> Speed: {formatSpeed(currentSpeed)}</p>
-                        )}
+                        <CheckCircle className="w-10 md:w-12 h-10 md:h-12 mx-auto mb-4 text-green-600" />
+                        <p className="font-black text-base md:text-lg text-green-800">CONNECTED!</p>
+                        <p className="font-bold text-sm md:text-base">Ready to share files & chat</p>
+                        <p className="text-xs md:text-sm mt-2">P2P connection established • End-to-end encrypted</p>
                       </div>
                     )}
                     {(wsStatus === "disconnected" || wsStatus === "error") && (
@@ -3636,7 +3081,8 @@ export default function SessionPage() {
                           onClick={handleReconnect}
                           className="neubrutalism-button bg-red-500 text-white touch-target"
                         >
-                          <RefreshCw className="w-4 h-4 mr-2" />  RECONNECT
+                          <RefreshCw className="w-4 h-4 mr-2" />
+                          RECONNECT
                         </Button>
                       </div>
                     )}
@@ -3644,7 +3090,7 @@ export default function SessionPage() {
                       <div className="bg-orange-200 p-4 md:p-6 border-4 border-black">
                         <WifiOff className="w-10 md:w-12 h-10 md:h-12 mx-auto mb-4 text-orange-600" />
                         <p className="font-black text-base md:text-lg text-orange-800">PEER DISCONNECTED</p>
-                        <p className="font-bold mb-4 text-sm md:text-base">Auto-reconnecting to peer...</p>
+                        <p className="font-bold mb-4 text-sm md:text-base">Waiting for peer to reconnect...</p>
                         <Button
                           onClick={() => {
                             resetPeerConnection()
@@ -3658,12 +3104,13 @@ export default function SessionPage() {
                                   }),
                                 )
                               }
-                            }, 500)
+                            }, 1000)
                           }}
                           className="neubrutalism-button bg-orange-500 text-white touch-target"
                           size="sm"
                         >
-                          <RefreshCw className="w-3 md:w-4 h-3 md:h-4 mr-1" /> FORCE RETRY
+                          <RefreshCw className="w-3 md:w-4 h-3 md:h-4 mr-1" />
+                          RETRY P2P
                         </Button>
                       </div>
                     )}
@@ -3679,7 +3126,8 @@ export default function SessionPage() {
               <Card className="neubrutalism-card bg-green-200">
                 <CardHeader className="pb-3 md:pb-6">
                   <CardTitle className="text-lg md:text-2xl font-black flex items-center gap-2">
-                    <Zap className="w-5 md:w-6 h-5 md:h-6" />  FILE TRANSFERS
+                    <FileText className="w-5 md:w-6 h-5 md:h-6" />
+                    FILE TRANSFERS
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -3697,14 +3145,6 @@ export default function SessionPage() {
                             <span className="text-xs md:text-sm text-gray-600 flex-shrink-0">
                               ({(transfer.size / 1024 / 1024).toFixed(1)}MB)
                             </span>
-                            {transfer.compressionRatio && transfer.compressionRatio > 1 && (
-                              <span
-                                className="text-xs bg-blue-100 px-1 rounded"
-                                title={`Compressed ${transfer.compressionRatio.toFixed(1)}x`}
-                              >
-                                🗜️{transfer.compressionRatio.toFixed(1)}x
-                              </span>
-                            )}
                             {transfer.checksum && (
                               <span title="Checksum verified">
                                 <Shield className="w-3 md:w-4 h-3 md:h-4 text-green-600 flex-shrink-0" />
@@ -3715,9 +3155,6 @@ export default function SessionPage() {
                                 <Scan className="w-3 md:w-4 h-3 md:h-4 text-green-600 flex-shrink-0" />
                               </span>
                             )}
-                            <Zap
-                              className="w-3 md:w-4 h-3 md:h-4 text-orange-500 flex-shrink-0"
-                            />
                           </div>
 
                           <span
@@ -3744,22 +3181,10 @@ export default function SessionPage() {
                             <strong>Blocked:</strong> {transfer.scanResult.reason}
                           </div>
                         )}
-
                         <div className="progress-bar">
                           <div className="progress-fill" style={{ width: `${transfer.progress}%` }} />
                         </div>
-
-                        <div className="flex justify-between items-center text-xs md:text-sm mt-1">
-                          <span className="font-bold">{transfer.progress}%</span>
-                          {transfer.transferStats && transfer.transferStats.speed > 0 && (
-                            <span className="text-green-600 font-bold">
-                               {formatSpeed(transfer.transferStats.speed)}
-                            </span>
-                          )}
-                          {transfer.transferStats && transfer.transferStats.eta > 0 && transfer.progress < 100 && (
-                            <span className="text-gray-600">ETA: {Math.ceil(transfer.transferStats.eta)}s</span>
-                          )}
-                        </div>
+                        <div className="text-right text-xs md:text-sm font-bold mt-1">{transfer.progress}%</div>
                       </div>
                     ))}
                   </div>
