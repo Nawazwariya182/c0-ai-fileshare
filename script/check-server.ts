@@ -5,10 +5,10 @@ async function checkSignalingServer() {
   console.log("🔍 Checking signaling server...")
 
   try {
-    const ws = new WebSocket("ws://localhost:8080")
+    const ws = new WebSocket("ws://c0-ai-fileshare.onrender.com")
 
     ws.on("open", () => {
-      console.log("✅ Signaling server is running on ws://localhost:8080")
+      console.log("✅ Signaling server is running on ws://c0-ai-fileshare.onrender.com")
       ws.close()
       process.exit(0)
     })
