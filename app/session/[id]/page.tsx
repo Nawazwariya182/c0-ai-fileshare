@@ -2527,8 +2527,8 @@ export default function SessionPage() {
   }
 
   const validateFile = (file: File): string | null => {
-    if (file.size > 100 * 1024 * 1024) {
-      return "File size must be less than 100MB"
+    if (file.size > 1024 * 1024 * 1024) {
+      return "File size must be less than 1GB"
     }
 
     const blockedExtensions = [
@@ -2967,7 +2967,7 @@ export default function SessionPage() {
                   </div>
 
                   <p className="text-xs md:text-sm font-bold mt-4 text-gray-600">
-                    Max 100MB per file • Multi-file support • AI Scanned • SHA-256 verified
+                    Max 1GB per file • Multi-file support • AI Scanned • SHA-256 verified
                   </p>
                 </div>
               </CardContent>
