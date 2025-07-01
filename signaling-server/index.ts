@@ -614,7 +614,6 @@ interface UserData {
   joinedAt: Date
   lastSeen: Date
   isInitiator: boolean
-  capabilities?: any
 }
 
 interface Session {
@@ -625,21 +624,22 @@ interface Session {
   connectionAttempts: number
 }
 
-class UltraReliableSignalingServer {
+class SignalingServer {
   private wss: WebSocketServer
   private sessions: Map<string, Session> = new Map()
   private userSessions: Map<WebSocket, string> = new Map()
   private server: any
-  private messageQueue: Map<string, any[]> = new Map() // Queue messages for offline users
 
   constructor(port = process.env.PORT || 8080) {
-    console.log("🚀 Starting Ultra-Reliable Signaling Server")
+    console.log("🚀 Initializing P2P Signaling Server...")
+    console.log(`🔧 Environment: ${process.env.NODE_ENV || "development"}`)
     console.log(`🌐 Port: ${port}`)
 
     this.server = createServer()
 
-    // Ultra-optimized CORS for maximum compatibility
+    // OPTIMIZED: Enhanced CORS and request handling
     this.server.on("request", (req, res) => {
+      // Set CORS headers for all requests
       const origin = req.headers.origin
       const allowedOrigins = [
         "https://p2p-file-share-fix.vercel.app",
@@ -650,11 +650,8 @@ class UltraReliableSignalingServer {
         "https://localhost:3000",
       ]
 
-      // Allow all Vercel deployments and localhost
-      if (
-        origin &&
-        (allowedOrigins.includes(origin) || origin.includes(".vercel.app") || origin.includes("localhost"))
-      ) {
+      // Allow all Vercel preview deployments
+      if (origin && (allowedOrigins.includes(origin) || origin.includes(".vercel.app"))) {
         res.setHeader("Access-Control-Allow-Origin", origin)
       } else if (!origin) {
         res.setHeader("Access-Control-Allow-Origin", "*")
@@ -670,53 +667,61 @@ class UltraReliableSignalingServer {
         return
       }
 
-      // Enhanced health check
+      // Health check endpoint
       if (req.url === "/health" || req.url === "/") {
         res.writeHead(200, { "Content-Type": "application/json" })
         res.end(
           JSON.stringify({
-            status: "ultra-reliable",
+            status: "healthy",
             timestamp: new Date().toISOString(),
             sessions: this.sessions.size,
             connections: this.userSessions.size,
             uptime: process.uptime(),
-            version: "4.0.0-ultra",
-            features: ["message-queuing", "connection-recovery", "adaptive-timeouts"],
+            version: "2.0.0",
           }),
         )
         return
       }
 
-      // Detailed stats endpoint
+      // Stats endpoint for debugging
       if (req.url === "/stats") {
         res.writeHead(200, { "Content-Type": "application/json" })
-        res.end(JSON.stringify(this.getDetailedStats()))
+        res.end(JSON.stringify(this.getStats()))
         return
       }
 
-      res.writeHead(404)
-      res.end()
+      res.writeHead(404, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: "Not Found" }))
     })
 
-    // Ultra-optimized WebSocket server configuration
+    // OPTIMIZED: Enhanced WebSocket server configuration
     this.wss = new WebSocketServer({
       server: this.server,
       perMessageDeflate: {
-        threshold: 512, // Compress smaller messages for speed
-        concurrencyLimit: 20, // Increased concurrency
+        zlibDeflateOptions: {
+          level: 3,
+          chunkSize: 1024,
+        },
+        threshold: 1024,
+        concurrencyLimit: 10,
         serverMaxWindowBits: 15,
         clientMaxWindowBits: 15,
         serverNoContextTakeover: false,
         clientNoContextTakeover: false,
       },
-      maxPayload: 2 * 1024 * 1024 * 1024, // 2GB for large signaling messages
+      maxPayload: 1024 * 1024 * 1024, // 1GB
       clientTracking: true,
       handleProtocols: (protocols) => {
-        return protocols.has("ultra-reliable-v1") ? "ultra-reliable-v1" : protocols.values().next().value || false
+        console.log("📡 WebSocket protocols:", protocols)
+        return protocols[0] || false
       },
       verifyClient: (info) => {
+        // OPTIMIZED: Less strict client verification for better connectivity
         const origin = info.origin
-        if (!origin) return true
+        console.log(`🔍 Verifying WebSocket client from origin: ${origin}`)
+
+        // Allow connections from Vercel and localhost
+        if (!origin) return true // Allow connections without origin
 
         const allowedOrigins = [
           "https://p2p-file-share-fix.vercel.app",
@@ -727,29 +732,42 @@ class UltraReliableSignalingServer {
           "https://localhost:3000",
         ]
 
-        return allowedOrigins.includes(origin) || origin.includes(".vercel.app") || origin.includes("localhost")
+        const isAllowed =
+          allowedOrigins.includes(origin) || origin.includes(".vercel.app") || origin.includes("localhost")
+        console.log(`${isAllowed ? "✅" : "❌"} Origin ${origin} ${isAllowed ? "allowed" : "blocked"}`)
+
+        return isAllowed
       },
     })
 
     this.wss.on("connection", this.handleConnection.bind(this))
-    this.wss.on("error", (error) => console.error("❌ WebSocket Server error:", error))
 
-    // Optimized cleanup - every 10 minutes
-    setInterval(this.cleanupSessions.bind(this), 600000)
-
-    // Message queue cleanup - every 5 minutes
-    setInterval(this.cleanupMessageQueue.bind(this), 300000)
-
-    this.server.listen(port, "0.0.0.0", () => {
-      console.log(`✅ Ultra-Reliable Signaling Server running on port ${port}`)
-      console.log(`🔗 Ready for ultra-reliable P2P connections`)
-      console.log(`📊 Features: Message queuing, Connection recovery, Adaptive timeouts`)
+    this.wss.on("error", (error) => {
+      console.error("❌ WebSocket Server error:", error)
     })
 
+    // OPTIMIZED: Less aggressive session cleanup
+    setInterval(this.cleanupSessions.bind(this), 120000) // Every 2 minutes instead of 1
+
+    // Start server with proper error handling
+    this.server.listen(port, "0.0.0.0", () => {
+      console.log(`✅ Signaling server successfully started!`)
+      console.log(`📡 HTTP server running on http://0.0.0.0:${port}`)
+      console.log(`🔗 WebSocket server running on ws://0.0.0.0:${port}`)
+      console.log(`🌍 Health check: http://0.0.0.0:${port}/health`)
+      console.log(`📊 Stats endpoint: http://0.0.0.0:${port}/stats`)
+      console.log(`🔗 Ready to accept connections`)
+      console.log("=".repeat(50))
+    })
+
+    // Enhanced error handling
     this.server.on("error", (error: any) => {
       if (error.code === "EADDRINUSE") {
         console.error(`❌ Port ${port} is already in use!`)
-        console.log(`💡 Kill the process using: lsof -ti:${port} | xargs kill`)
+        console.log(`💡 Try killing the process using port ${port}:`)
+        console.log(`   Windows: netstat -ano | findstr :${port}`)
+        console.log(`   Mac/Linux: lsof -ti:${port} | xargs kill`)
+        console.log(`   Or change the port in signaling-server/index.ts`)
       } else {
         console.error("❌ Server error:", error)
       }
@@ -759,55 +777,65 @@ class UltraReliableSignalingServer {
     // Graceful shutdown
     process.on("SIGTERM", this.shutdown.bind(this))
     process.on("SIGINT", this.shutdown.bind(this))
+
+    // Log server info
+    console.log(`🔧 WebSocket Server Configuration:`)
+    console.log(`   - Max Payload: 1GB`)
+    console.log(`   - Compression: Enabled`)
+    console.log(`   - Client Tracking: Enabled`)
+    console.log(`   - CORS: Configured for Vercel`)
   }
 
   private shutdown() {
-    console.log("\n🛑 Shutting down Ultra-Reliable Signaling Server...")
+    console.log("\n🛑 Shutting down signaling server...")
 
-    // Notify all clients
+    // Close all WebSocket connections gracefully
     this.wss.clients.forEach((ws) => {
       if (ws.readyState === WebSocket.OPEN) {
-        this.send(ws, { type: "server-shutdown", message: "Server shutting down gracefully" })
-        ws.close(1000, "Server shutdown")
+        ws.send(JSON.stringify({ type: "server-shutdown", message: "Server is shutting down" }))
+        ws.close(1000, "Server shutting down")
       }
     })
 
+    // Close the server
     this.server.close(() => {
       console.log("✅ Server shut down gracefully")
       process.exit(0)
     })
 
-    // Force exit after 15 seconds
+    // Force exit after 10 seconds
     setTimeout(() => {
       console.log("⚠️ Force closing server")
       process.exit(1)
-    }, 15000)
+    }, 10000)
   }
 
   private handleConnection(ws: WebSocket, req: any) {
     const clientIP = req.socket.remoteAddress
     const userAgent = req.headers["user-agent"]
 
-    console.log(`🔗 New ultra-reliable connection from ${clientIP}`)
-    console.log(`   User-Agent: ${userAgent?.substring(0, 50)}...`)
+    console.log(`🔗 New client connected from ${clientIP}`)
+    console.log(`   User-Agent: ${userAgent}`)
 
-    // Send enhanced connection confirmation
+    // Send immediate confirmation with server info
     this.send(ws, {
       type: "connected",
-      message: "Connected to ultra-reliable signaling server",
+      message: "Connected to signaling server",
       timestamp: new Date().toISOString(),
-      version: "4.0.0-ultra",
-      features: ["message-queuing", "connection-recovery", "adaptive-timeouts"],
-      serverId: process.env.DYNO || "local",
+      serverVersion: "2.0.0",
+      features: ["file-transfer", "chat", "p2p"],
     })
 
-    // Enhanced message handling
+    // Set up connection handlers
     ws.on("message", (data) => {
       try {
         const message = JSON.parse(data.toString())
-        this.handleMessage(ws, message, clientIP)
+        console.log(
+          `📨 Received: ${message.type} ${message.sessionId ? `(session: ${message.sessionId})` : ""} from ${clientIP}`,
+        )
+        this.handleMessage(ws, message)
       } catch (error) {
-        console.error("❌ Invalid message format from", clientIP, ":", error)
+        console.error("❌ Invalid message format:", error)
         this.sendError(ws, "Invalid message format")
       }
     })
@@ -822,25 +850,21 @@ class UltraReliableSignalingServer {
       this.handleDisconnection(ws)
     })
 
-    // Ultra-reliable ping/pong with adaptive intervals
+    // Enhanced ping/pong handling
     ws.on("pong", (data) => {
-      const timestamp = data.toString()
-      if (timestamp) {
-        const latency = Date.now() - Number.parseInt(timestamp)
-        console.log(`🏓 Pong from ${clientIP} (${latency}ms)`)
-      }
+      console.log(`🏓 Pong received from ${clientIP}`)
     })
 
-    // Adaptive keep-alive based on connection quality
+    // OPTIMIZED: More frequent ping for better connection monitoring
     const pingInterval = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
-        ws.ping(Date.now().toString())
+        ws.ping("ping")
       } else {
         clearInterval(pingInterval)
       }
-    }, 15000) // Every 15 seconds
+    }, 15000) // Every 15 seconds instead of 30
 
-    // Extended connection timeout for stability
+    // OPTIMIZED: Longer connection timeout
     const connectionTimeout = setTimeout(
       () => {
         if (ws.readyState === WebSocket.OPEN) {
@@ -848,8 +872,8 @@ class UltraReliableSignalingServer {
           ws.close(1008, "Connection timeout")
         }
       },
-      30 * 60 * 1000,
-    ) // 30 minutes
+      15 * 60 * 1000, // 15 minutes instead of 5
+    )
 
     ws.on("close", () => {
       clearInterval(pingInterval)
@@ -857,39 +881,35 @@ class UltraReliableSignalingServer {
     })
   }
 
-  private handleMessage(ws: WebSocket, message: any, clientIP: string) {
+  private handleMessage(ws: WebSocket, message: any) {
     const { type, sessionId, userId } = message
 
-    // Enhanced validation
+    // Enhanced session ID validation
     if (sessionId && !/^[A-Z0-9]{6}$/.test(sessionId)) {
       this.sendError(ws, "Invalid session ID format. Must be 6 alphanumeric characters.")
       return
     }
 
+    // Enhanced user ID validation
     if (userId && (typeof userId !== "string" || userId.length < 1 || userId.length > 100)) {
       this.sendError(ws, "Invalid user ID format")
       return
     }
 
-    // Log message with enhanced details
-    console.log(
-      `📨 ${type} from ${clientIP} ${sessionId ? `(session: ${sessionId})` : ""} ${userId ? `(user: ${userId.substring(0, 8)}...)` : ""}`,
-    )
-
     switch (type) {
       case "join":
-        this.handleJoin(ws, sessionId, userId, message.capabilities)
+        this.handleJoin(ws, sessionId, userId, message.reconnect)
         break
       case "ping":
-        this.handlePing(ws, sessionId, userId, message.timestamp)
+        this.handlePing(ws, sessionId, userId)
+        break
+      case "retry-connection":
+        this.handleRetryConnection(ws, sessionId, userId)
         break
       case "offer":
       case "answer":
       case "ice-candidate":
         this.relaySignalingMessage(ws, message)
-        break
-      case "connection-recovery":
-        this.handleConnectionRecovery(ws, sessionId, userId)
         break
       default:
         console.log(`⚠️ Unknown message type: ${type}`)
@@ -897,13 +917,13 @@ class UltraReliableSignalingServer {
     }
   }
 
-  private handleJoin(ws: WebSocket, sessionId: string, userId: string, capabilities?: any) {
+  private handleJoin(ws: WebSocket, sessionId: string, userId: string, isReconnect = false) {
     if (!sessionId || !userId) {
       this.sendError(ws, "Session ID and User ID are required")
       return
     }
 
-    console.log(`👤 User ${userId.substring(0, 8)}... joining session ${sessionId}`)
+    console.log(`👤 User ${userId} ${isReconnect ? "reconnecting to" : "joining"} session ${sessionId}`)
 
     // Get or create session
     let session = this.sessions.get(sessionId)
@@ -916,23 +936,20 @@ class UltraReliableSignalingServer {
         connectionAttempts: 0,
       }
       this.sessions.set(sessionId, session)
-      console.log(`🆕 Created ultra-reliable session: ${sessionId}`)
+      console.log(`🆕 Created session: ${sessionId}`)
     }
 
-    // Handle reconnection
+    // Check if user is already in session (reconnection)
     const existingUser = session.users.get(userId)
     if (existingUser) {
-      console.log(`🔄 User ${userId.substring(0, 8)}... reconnecting to session ${sessionId}`)
-
-      // Update connection
+      console.log(`🔄 User ${userId} reconnecting to session ${sessionId}`)
+      // Update the WebSocket connection
       existingUser.ws = ws
       existingUser.lastSeen = new Date()
       this.userSessions.set(ws, sessionId)
       session.lastActivity = new Date()
 
-      // Send queued messages
-      this.deliverQueuedMessages(userId)
-
+      // Send confirmation
       this.send(ws, {
         type: "joined",
         sessionId,
@@ -940,16 +957,15 @@ class UltraReliableSignalingServer {
         userId,
         isInitiator: existingUser.isInitiator,
         reconnected: true,
-        capabilities: existingUser.capabilities,
       })
 
+      // Notify other users about reconnection
       this.broadcastToSession(
         sessionId,
         {
           type: "user-reconnected",
           userId,
           userCount: session.users.size,
-          timestamp: Date.now(),
         },
         ws,
       )
@@ -957,22 +973,23 @@ class UltraReliableSignalingServer {
       return
     }
 
-    // Check session capacity
+    // Check if session is full (max 2 users for P2P)
     if (session.users.size >= 2) {
       console.log(`❌ Session ${sessionId} is full (${session.users.size}/2 users)`)
-      this.sendError(ws, "Session is full (maximum 2 users for P2P)")
+      this.sendError(ws, "Session is full (maximum 2 users)")
       return
     }
 
-    // Add new user
+    // Determine if this user should be the initiator
     const isInitiator = session.users.size === 0
+
+    // Add user to session
     const userData: UserData = {
       ws,
       userId,
       joinedAt: new Date(),
       lastSeen: new Date(),
       isInitiator,
-      capabilities,
     }
 
     session.users.set(userId, userData)
@@ -980,10 +997,10 @@ class UltraReliableSignalingServer {
     session.lastActivity = new Date()
 
     console.log(
-      `✅ User ${userId.substring(0, 8)}... joined session ${sessionId} (${session.users.size}/2) ${isInitiator ? "[INITIATOR]" : "[RECEIVER]"}`,
+      `✅ User ${userId} joined session ${sessionId} (${session.users.size}/2 users) ${isInitiator ? "[INITIATOR]" : "[RECEIVER]"}`,
     )
 
-    // Send confirmation
+    // Send confirmation to the joining user
     this.send(ws, {
       type: "joined",
       sessionId,
@@ -991,14 +1008,13 @@ class UltraReliableSignalingServer {
       userId,
       isInitiator,
       sessionCreated: session.createdAt.toISOString(),
-      capabilities,
     })
 
-    // Trigger P2P connection when session is full
+    // If this is the second user, notify both users to start connection
     if (session.users.size === 2) {
-      console.log(`🚀 Session ${sessionId} ready for ultra-reliable P2P connection`)
+      console.log(`🚀 Session ${sessionId} is full, initiating P2P connection`)
 
-      // Immediate notification for faster connection establishment
+      // OPTIMIZED: Reduced delay for faster connection
       setTimeout(() => {
         this.broadcastToSession(
           sessionId,
@@ -1007,26 +1023,28 @@ class UltraReliableSignalingServer {
             userId,
             userCount: session.users.size,
             readyForConnection: true,
-            timestamp: Date.now(),
           },
           ws,
         )
-      }, 50) // Minimal delay
+      }, 500) // Reduced from 1000ms
     } else {
+      // Just notify about the join
       this.broadcastToSession(
         sessionId,
         {
           type: "user-joined",
           userId,
           userCount: session.users.size,
-          timestamp: Date.now(),
         },
         ws,
       )
     }
+
+    // Log session state
+    console.log(`📊 Session ${sessionId} users:`, Array.from(session.users.keys()))
   }
 
-  private handlePing(ws: WebSocket, sessionId: string, userId: string, timestamp?: number) {
+  private handlePing(ws: WebSocket, sessionId: string, userId: string) {
     const session = this.sessions.get(sessionId)
     if (session && userId) {
       const user = session.users.get(userId)
@@ -1038,13 +1056,13 @@ class UltraReliableSignalingServer {
 
     this.send(ws, {
       type: "pong",
-      timestamp: timestamp || Date.now(),
-      serverTime: Date.now(),
+      timestamp: Date.now(),
+      serverTime: new Date().toISOString(),
     })
   }
 
-  private handleConnectionRecovery(ws: WebSocket, sessionId: string, userId: string) {
-    console.log(`🔧 Connection recovery requested by ${userId.substring(0, 8)}... in session ${sessionId}`)
+  private handleRetryConnection(ws: WebSocket, sessionId: string, userId: string) {
+    console.log(`🔄 Retry connection requested by ${userId} in session ${sessionId}`)
 
     const session = this.sessions.get(sessionId)
     if (!session) {
@@ -1055,9 +1073,9 @@ class UltraReliableSignalingServer {
     session.connectionAttempts++
     session.lastActivity = new Date()
 
-    // Broadcast recovery request
+    // Broadcast retry request to all users in session
     this.broadcastToSession(sessionId, {
-      type: "connection-recovery",
+      type: "retry-connection",
       userId,
       attempt: session.connectionAttempts,
       timestamp: Date.now(),
@@ -1077,9 +1095,10 @@ class UltraReliableSignalingServer {
       return
     }
 
+    // Update last activity
     session.lastActivity = new Date()
 
-    // Find sender
+    // Update user's last seen
     const userId = Array.from(session.users.entries()).find(([_, userData]) => userData.ws === ws)?.[0]
     if (userId) {
       const user = session.users.get(userId)
@@ -1088,29 +1107,28 @@ class UltraReliableSignalingServer {
       }
     }
 
-    // Enhanced message validation
-    const messageSize = JSON.stringify(message).length
-    if (messageSize > 10 * 1024 * 1024) {
-      // 10MB limit
-      this.sendError(ws, "Message too large")
-      return
-    }
-
     console.log(
-      `🔄 Relaying ${message.type} from ${userId?.substring(0, 8)}... in session ${sessionId} (${messageSize} bytes)`,
+      `🔄 Relaying ${message.type} from ${userId} in session ${sessionId} to ${session.users.size - 1} other users`,
     )
 
-    // Add metadata to message
+    // Add sender info and validation to message
     const relayMessage = {
       ...message,
       senderId: userId,
       timestamp: Date.now(),
       serverProcessed: new Date().toISOString(),
-      messageId: Math.random().toString(36).substring(2, 15),
     }
 
-    // Relay with delivery confirmation
-    this.broadcastToSessionWithConfirmation(sessionId, relayMessage, ws)
+    // OPTIMIZED: Increased message size limit
+    const messageSize = JSON.stringify(relayMessage).length
+    if (messageSize > 5 * 1024 * 1024) {
+      // 5MB limit instead of 1MB
+      this.sendError(ws, "Message too large")
+      return
+    }
+
+    // Relay message to other users in the session
+    this.broadcastToSession(sessionId, relayMessage, ws)
   }
 
   private handleDisconnection(ws: WebSocket) {
@@ -1120,20 +1138,21 @@ class UltraReliableSignalingServer {
     const session = this.sessions.get(sessionId)
     if (!session) return
 
+    // Find and handle user disconnection
     let disconnectedUserId: string | undefined
 
-    // Find disconnected user
     for (const [userId, userData] of session.users.entries()) {
       if (userData.ws === ws) {
         disconnectedUserId = userId
-        userData.lastSeen = new Date(Date.now() - 30000) // Mark as 30 seconds ago
+        // Mark as disconnected for potential reconnection
+        userData.lastSeen = new Date(Date.now() - 60000) // Mark as 1 minute ago
         break
       }
     }
 
     if (disconnectedUserId) {
       this.userSessions.delete(ws)
-      console.log(`👋 User ${disconnectedUserId.substring(0, 8)}... disconnected from session ${sessionId}`)
+      console.log(`👋 User ${disconnectedUserId} disconnected from session ${sessionId}`)
 
       // Notify remaining users
       this.broadcastToSession(sessionId, {
@@ -1144,16 +1163,17 @@ class UltraReliableSignalingServer {
         timestamp: Date.now(),
       })
 
-      // Extended grace period for reconnection (10 minutes)
+      // OPTIMIZED: Longer grace period for reconnection
       setTimeout(() => {
         const currentSession = this.sessions.get(sessionId)
         if (currentSession) {
           const user = currentSession.users.get(disconnectedUserId!)
-          if (user && Date.now() - user.lastSeen.getTime() > 600000) {
-            // 10 minutes
+          if (user && Date.now() - user.lastSeen.getTime() > 300000) {
+            // 5 minutes instead of 2
             currentSession.users.delete(disconnectedUserId!)
-            console.log(`🗑️ Removed inactive user ${disconnectedUserId!.substring(0, 8)}... from session ${sessionId}`)
+            console.log(`🗑️ Removed inactive user ${disconnectedUserId} from session ${sessionId}`)
 
+            // Notify remaining users
             this.broadcastToSession(sessionId, {
               type: "user-left",
               userId: disconnectedUserId,
@@ -1162,15 +1182,14 @@ class UltraReliableSignalingServer {
               timestamp: Date.now(),
             })
 
-            // Clean up empty sessions
+            // Remove empty sessions
             if (currentSession.users.size === 0) {
               this.sessions.delete(sessionId)
-              this.messageQueue.delete(sessionId)
               console.log(`🗑️ Removed empty session: ${sessionId}`)
             }
           }
         }
-      }, 600000) // 10 minutes
+      }, 300000) // 5 minutes instead of 2
     }
   }
 
@@ -1179,95 +1198,31 @@ class UltraReliableSignalingServer {
     if (!session) return
 
     let sentCount = 0
-    let queuedCount = 0
+    let failedCount = 0
 
-    session.users.forEach((userData, userId) => {
-      if (userData.ws !== excludeWs) {
-        if (userData.ws.readyState === WebSocket.OPEN) {
-          try {
-            this.send(userData.ws, message)
-            sentCount++
-          } catch (error) {
-            console.error(`❌ Failed to send message to user ${userId.substring(0, 8)}...:`, error)
-            this.queueMessage(userId, message)
-            queuedCount++
-          }
-        } else {
-          // Queue message for offline user
-          this.queueMessage(userId, message)
-          queuedCount++
+    session.users.forEach((userData) => {
+      if (userData.ws !== excludeWs && userData.ws.readyState === WebSocket.OPEN) {
+        try {
+          this.send(userData.ws, message)
+          sentCount++
+        } catch (error) {
+          console.error(`❌ Failed to send message to user:`, error)
+          failedCount++
         }
       }
     })
 
-    if (sentCount > 0 || queuedCount > 0) {
-      console.log(`📡 Broadcasted ${message.type} to session ${sessionId}: ${sentCount} sent, ${queuedCount} queued`)
-    }
-  }
-
-  private broadcastToSessionWithConfirmation(sessionId: string, message: any, excludeWs?: WebSocket) {
-    // Add delivery tracking
-    message.requiresConfirmation = true
-    message.deliveryId = Math.random().toString(36).substring(2, 15)
-
-    this.broadcastToSession(sessionId, message, excludeWs)
-  }
-
-  private queueMessage(userId: string, message: any) {
-    if (!this.messageQueue.has(userId)) {
-      this.messageQueue.set(userId, [])
+    if (sentCount > 0) {
+      console.log(`📡 Broadcasted ${message.type} to ${sentCount} users in session ${sessionId}`)
     }
 
-    const queue = this.messageQueue.get(userId)!
-    queue.push({
-      ...message,
-      queuedAt: Date.now(),
-    })
-
-    // Limit queue size to prevent memory issues
-    if (queue.length > 100) {
-      queue.shift() // Remove oldest message
+    if (failedCount > 0) {
+      console.log(`⚠️ Failed to send to ${failedCount} users in session ${sessionId}`)
     }
 
-    console.log(`📬 Queued message for user ${userId.substring(0, 8)}... (queue size: ${queue.length})`)
-  }
-
-  private deliverQueuedMessages(userId: string) {
-    const queue = this.messageQueue.get(userId)
-    if (!queue || queue.length === 0) return
-
-    console.log(`📬 Delivering ${queue.length} queued messages to user ${userId.substring(0, 8)}...`)
-
-    const session = this.getSessionByUserId(userId)
-    if (!session) return
-
-    const userData = session.users.get(userId)
-    if (!userData || userData.ws.readyState !== WebSocket.OPEN) return
-
-    // Deliver messages in order
-    queue.forEach((message) => {
-      try {
-        this.send(userData.ws, {
-          ...message,
-          wasQueued: true,
-          deliveredAt: Date.now(),
-        })
-      } catch (error) {
-        console.error(`❌ Failed to deliver queued message to ${userId.substring(0, 8)}...:`, error)
-      }
-    })
-
-    // Clear queue
-    this.messageQueue.delete(userId)
-  }
-
-  private getSessionByUserId(userId: string): Session | undefined {
-    for (const session of this.sessions.values()) {
-      if (session.users.has(userId)) {
-        return session
-      }
+    if (sentCount === 0 && session.users.size > 1) {
+      console.log(`⚠️ No active users to broadcast ${message.type} to in session ${sessionId}`)
     }
-    return undefined
   }
 
   private send(ws: WebSocket, message: any) {
@@ -1290,34 +1245,33 @@ class UltraReliableSignalingServer {
     })
   }
 
+  // OPTIMIZED: Less aggressive session cleanup
   private cleanupSessions() {
     const now = new Date()
     const expiredSessions: string[] = []
 
-    console.log(`🧹 Running session cleanup...`)
-
     this.sessions.forEach((session, sessionId) => {
-      // Remove sessions inactive for more than 2 hours
+      // Remove sessions inactive for more than 30 minutes instead of 10
       const inactiveTime = now.getTime() - session.lastActivity.getTime()
-      if (inactiveTime > 2 * 60 * 60 * 1000) {
-        // 2 hours
+      if (inactiveTime > 30 * 60 * 1000) {
         expiredSessions.push(sessionId)
       } else {
         // Clean up inactive users within active sessions
         const inactiveUsers: string[] = []
         session.users.forEach((userData, userId) => {
           const userInactiveTime = now.getTime() - userData.lastSeen.getTime()
-          if (userInactiveTime > 60 * 60 * 1000) {
-            // 1 hour
+          if (userInactiveTime > 15 * 60 * 1000) {
+            // 15 minutes instead of 5
             inactiveUsers.push(userId)
           }
         })
 
         inactiveUsers.forEach((userId) => {
           session.users.delete(userId)
-          console.log(`🧹 Removed inactive user ${userId.substring(0, 8)}... from session ${sessionId}`)
+          console.log(`🧹 Removed inactive user ${userId} from session ${sessionId}`)
         })
 
+        // Remove session if no users left
         if (session.users.size === 0) {
           expiredSessions.push(sessionId)
         }
@@ -1327,13 +1281,13 @@ class UltraReliableSignalingServer {
     expiredSessions.forEach((sessionId) => {
       const session = this.sessions.get(sessionId)
       if (session) {
+        // Close all connections in expired session
         session.users.forEach((userData) => {
           this.sendError(userData.ws, "Session expired due to inactivity")
           userData.ws.close(1000, "Session expired")
         })
 
         this.sessions.delete(sessionId)
-        this.messageQueue.delete(sessionId)
         console.log(`⏰ Expired session: ${sessionId}`)
       }
     })
@@ -1347,52 +1301,22 @@ class UltraReliableSignalingServer {
     }
   }
 
-  private cleanupMessageQueue() {
-    const now = Date.now()
-    let totalCleaned = 0
-
-    this.messageQueue.forEach((queue, userId) => {
-      const originalLength = queue.length
-
-      // Remove messages older than 1 hour
-      this.messageQueue.set(
-        userId,
-        queue.filter((msg) => now - msg.queuedAt < 60 * 60 * 1000),
-      )
-
-      const cleaned = originalLength - queue.length
-      totalCleaned += cleaned
-
-      if (queue.length === 0) {
-        this.messageQueue.delete(userId)
-      }
-    })
-
-    if (totalCleaned > 0) {
-      console.log(`🧹 Cleaned ${totalCleaned} old queued messages`)
-    }
-  }
-
-  public getDetailedStats() {
+  public getStats() {
     return {
       activeSessions: this.sessions.size,
       totalConnections: this.userSessions.size,
-      queuedMessages: Array.from(this.messageQueue.values()).reduce((sum, queue) => sum + queue.length, 0),
       uptime: process.uptime(),
       memory: process.memoryUsage(),
-      version: "4.0.0-ultra",
-      features: ["message-queuing", "connection-recovery", "adaptive-timeouts"],
       sessions: Array.from(this.sessions.entries()).map(([id, session]) => ({
         id,
         userCount: session.users.size,
         activeUsers: Array.from(session.users.values()).filter((u) => u.ws.readyState === WebSocket.OPEN).length,
         users: Array.from(session.users.entries()).map(([userId, userData]) => ({
-          userId: userId.substring(0, 8) + "...",
+          userId,
           isInitiator: userData.isInitiator,
           joinedAt: userData.joinedAt,
           lastSeen: userData.lastSeen,
           connected: userData.ws.readyState === WebSocket.OPEN,
-          capabilities: userData.capabilities,
         })),
         createdAt: session.createdAt,
         lastActivity: session.lastActivity,
@@ -1402,34 +1326,55 @@ class UltraReliableSignalingServer {
   }
 }
 
-// Enhanced error handling and startup
-async function startUltraReliableServer() {
+// Enhanced port checking
+function checkPort(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = createServer()
+    server.listen(port, () => {
+      server.close(() => resolve(true))
+    })
+    server.on("error", () => resolve(false))
+  })
+}
+
+// Start the server with enhanced error handling
+async function startServer() {
   const port = process.env.PORT || 8080
 
-  console.log(`🔍 Starting Ultra-Reliable Signaling Server on port ${port}`)
+  console.log(`🔍 Checking if port ${port} is available...`)
 
   try {
-    new UltraReliableSignalingServer(Number(port))
+    const isPortAvailable = await checkPort(Number(port))
+    if (!isPortAvailable) {
+      console.error(`❌ Port ${port} is already in use!`)
+      console.log("💡 Solutions:")
+      console.log("   1. Kill the process using the port:")
+      console.log("      Windows: netstat -ano | findstr :8080")
+      console.log("      Mac/Linux: lsof -ti:8080 | xargs kill")
+      console.log("   2. Or use a different port by setting PORT environment variable")
+      process.exit(1)
+    }
+
+    console.log(`✅ Port ${port} is available`)
+    new SignalingServer(Number(port))
   } catch (error) {
-    console.error("❌ Error starting ultra-reliable server:", error)
+    console.error("❌ Error starting server:", error)
     process.exit(1)
   }
 }
 
-// Enhanced global error handling
+// Enhanced error handling
 process.on("uncaughtException", (error) => {
   console.error("💥 Uncaught Exception:", error)
-  console.error("Stack:", error.stack)
   process.exit(1)
 })
 
 process.on("unhandledRejection", (reason, promise) => {
-  console.error("💥 Unhandled Rejection at:", promise)
-  console.error("Reason:", reason)
+  console.error("💥 Unhandled Rejection at:", promise, "reason:", reason)
   process.exit(1)
 })
 
-// Start the ultra-reliable server
-startUltraReliableServer()
+// Start the server
+startServer()
 
-export default UltraReliableSignalingServer
+export default SignalingServer
