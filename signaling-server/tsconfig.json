@@ -6,7 +6,10 @@
     "rootDir": ".",
     "strict": true,
     "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true
+    "noImplicitAny": false,
+    "forceConsistentCasingInFileNames": true,
+    "moduleResolution": "node",
+    "types": ["node", "ws"]
   },
   "include": ["index.ts"]
 }

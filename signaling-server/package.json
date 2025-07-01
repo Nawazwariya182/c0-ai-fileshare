@@ -7,9 +7,13 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "ws": "^8.13.0"
+    "ws": "latest",
+    "http": "latest"
+
   },
   "devDependencies": {
-    "typescript": "^5.4.0"
+    "@types/node": "^24.0.8",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.8.3"
   }
 }
