@@ -2975,25 +2975,26 @@ export default function SessionPage() {
           </div>
 
           {/* Mobile-specific file selection alternative */}
-          {isMobile && connectionStatus === "connected" && (
+            {/* Mobile-specific file selection alternative */}
+            {/* {isMobile && connectionStatus === "connected" && (
             <div className="mt-4 p-4 bg-blue-100 border-2 border-blue-400 rounded">
               <p className="text-sm font-bold mb-2">📱 Mobile File Selection:</p>
               <label
-                htmlFor="mobile-file-input"
-                className="block w-full p-3 bg-blue-500 text-white font-bold text-center border-2 border-black cursor-pointer hover:bg-blue-600"
+              htmlFor="mobile-file-input"
+              className="block w-full p-3 bg-blue-500 text-white font-bold text-center border-2 border-black cursor-pointer hover:bg-blue-600"
               >
-                📁 SELECT FILES FROM DEVICE
+              📁 SELECT FILES FROM DEVICE
               </label>
               <input
-                id="mobile-file-input"
-                type="file"
-                multiple
-                onChange={handleFileSelect}
-                className="hidden"
-                accept="*/*"
+              id="mobile-file-input"
+              type="file"
+              multiple
+              onChange={handleFileSelect}
+              className="hidden"
+              accept="*//*"
               />
             </div>
-          )}
+            )} */}
 
           {/* Row 2: Chat (2/3) + Connection Status (1/3) */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
