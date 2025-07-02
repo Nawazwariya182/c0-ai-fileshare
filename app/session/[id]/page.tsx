@@ -6,15 +6,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { useUser } from "@clerk/nextjs"
 import { useParams, useRouter } from "next/navigation"
-import { Upload, Download, Users, Wifi, WifiOff, FileText, AlertTriangle, CheckCircle, X, RefreshCw, Shield, Smartphone, Monitor, Scan, Files } from 'lucide-react'
+import { Upload, Download, Users, Wifi, WifiOff, FileText, AlertTriangle, CheckCircle, X, RefreshCw, Shield, Smartphone, Monitor } from 'lucide-react'
 
-// Import optimized core systems
 import { FilePreviewModal } from "@/components/file-preview-modal"
 import { ChatPanel } from "@/components/chat-panel"
-import { getAIScanner, type ScanResult } from "@/lib/ai-scanner"
-import { SessionManager } from "@/lib/session-manager"
-import { NotificationManager } from "@/lib/notifications"
-import { UltraReliableP2P } from "@/lib/ultra-reliable-p2p"
+import { BulletproofP2P } from "@/lib/bulletproof-p2p"
 
 interface FileTransfer {
   id: string
@@ -22,10 +18,8 @@ interface FileTransfer {
   size: number
   type: string
   progress: number
-  status: "pending" | "scanning" | "transferring" | "completed" | "error" | "blocked"
+  status: "pending" | "transferring" | "completed" | "error"
   direction: "sending" | "receiving"
-  checksum?: string
-  scanResult?: ScanResult
   speed?: number
 }
 
@@ -43,9 +37,9 @@ export default function SessionPage() {
   const router = useRouter()
   const sessionId = params.id as string
 
-  // Core connection states
+  // Simple connection states
   const [connectionStatus, setConnectionStatus] = useState<"connecting" | "connected" | "disconnected">("connecting")
-  const [wsStatus, setWsStatus] = useState<"connecting" | "connected" | "disconnected" | "error">("connecting")
+  const [wsStatus, setWsStatus] = useState<"connecting" | "connected" | "disconnected">("connecting")
   const [fileTransfers, setFileTransfers] = useState<FileTransfer[]>([])
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [error, setError] = useState("")
@@ -59,364 +53,81 @@ export default function SessionPage() {
   const [currentSpeed, setCurrentSpeed] = useState(0)
   const [connectionQuality, setConnectionQuality] = useState<"excellent" | "good" | "poor">("excellent")
 
-  // Core system refs
+  // Simple refs
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const ultraP2PRef = useRef<UltraReliableP2P | null>(null)
-  const sessionTimerRef = useRef<NodeJS.Timeout | null>(null)
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const connectionAttempts = useRef(0)
-  const isReconnecting = useRef(false)
-  const lastActivity = useRef(Date.now())
-  const visibilityTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const connectionHealthTimer = useRef<NodeJS.Timeout | null>(null)
+  const p2pRef = useRef<BulletproofP2P | null>(null)
 
-  // Ultra-fast connection management
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        console.log("📱 Page hidden - maintaining ultra-reliable connection")
-        lastActivity.current = Date.now()
-
-        if (visibilityTimeoutRef.current) {
-          clearTimeout(visibilityTimeoutRef.current)
-        }
-
-        if (ultraP2PRef.current) {
-          ultraP2PRef.current.enableBackgroundMode(true)
-          ultraP2PRef.current.maintainConnection()
-        }
-      } else {
-        console.log("📱 Page visible - instant optimization")
-
-        if (visibilityTimeoutRef.current) {
-          clearTimeout(visibilityTimeoutRef.current)
-        }
-
-        if (ultraP2PRef.current) {
-          ultraP2PRef.current.enableBackgroundMode(false)
-          // Ultra-fast connection check and recovery
-          setTimeout(() => {
-            if (ultraP2PRef.current && (connectionStatus !== "connected" || wsStatus !== "connected")) {
-              console.log("🔄 Instant recovery after visibility change")
-              handleReconnect()
-            }
-          }, 50) // Reduced to 50ms for instant recovery
-        }
-      }
-    }
-
-    const handlePageHide = () => {
-      console.log("📱 Page hide - preserving ultra-reliable state")
-      lastActivity.current = Date.now()
-      if (ultraP2PRef.current) {
-        ultraP2PRef.current.preserveConnectionState()
-        ultraP2PRef.current.maintainConnection()
-      }
-    }
-
-    const handlePageShow = () => {
-      console.log("📱 Page show - instant restoration")
-      if (ultraP2PRef.current) {
-        setTimeout(() => {
-          ultraP2PRef.current?.restoreConnectionState()
-          if (connectionStatus !== "connected" || wsStatus !== "connected") {
-            handleReconnect()
-          }
-        }, 25) // Reduced to 25ms for instant restoration
-      }
-    }
-
-    const handleBeforeUnload = () => {
-      if (ultraP2PRef.current) {
-        ultraP2PRef.current.gracefulDisconnect()
-      }
-    }
-
-    const handleFocus = () => {
-      lastActivity.current = Date.now()
-      if (ultraP2PRef.current) {
-        ultraP2PRef.current.maintainConnection()
-      }
-      // Instant connection check on focus
-      setTimeout(() => {
-        if (connectionStatus !== "connected" || wsStatus !== "connected") {
-          handleReconnect()
-        }
-      }, 100)
-    }
-
-    const handleBlur = () => {
-      if (ultraP2PRef.current) {
-        ultraP2PRef.current.preserveConnectionState()
-      }
-    }
-
-    // Add all mobile-specific event listeners
-    document.addEventListener("visibilitychange", handleVisibilityChange)
-    window.addEventListener("pagehide", handlePageHide)
-    window.addEventListener("pageshow", handlePageShow)
-    window.addEventListener("beforeunload", handleBeforeUnload)
-    window.addEventListener("focus", handleFocus)
-    window.addEventListener("blur", handleBlur)
-
-    // Mobile-specific touch events
-    const handleTouchStart = () => {
-      if (ultraP2PRef.current) {
-        ultraP2PRef.current.maintainConnection()
-      }
-    }
-
-    const handleTouchEnd = () => {
-      // Ensure connection stability after touch interactions
-      setTimeout(() => {
-        if (ultraP2PRef.current && connectionStatus !== "connected") {
-          handleReconnect()
-        }
-      }, 100)
-    }
-
-    document.addEventListener("touchstart", handleTouchStart)
-    document.addEventListener("touchend", handleTouchEnd)
-
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange)
-      window.removeEventListener("pagehide", handlePageHide)
-      window.removeEventListener("pageshow", handlePageShow)
-      window.removeEventListener("beforeunload", handleBeforeUnload)
-      window.removeEventListener("focus", handleFocus)
-      window.removeEventListener("blur", handleBlur)
-      document.removeEventListener("touchstart", handleTouchStart)
-      document.removeEventListener("touchend", handleTouchEnd)
-
-      if (visibilityTimeoutRef.current) {
-        clearTimeout(visibilityTimeoutRef.current)
-      }
-    }
-  }, [connectionStatus, wsStatus])
-
-  // Ultra-fast reconnection logic
-  const handleReconnect = () => {
-    if (isReconnecting.current) {
-      console.log("🔄 Reconnection already in progress")
-      return
-    }
-
-    isReconnecting.current = true
-    connectionAttempts.current++
-
-    console.log(`🔄 Ultra-fast reconnection attempt ${connectionAttempts.current}`)
-
-    setError("")
-
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current)
-    }
-
-    // Ultra-fast exponential backoff: 100ms, 200ms, 400ms, max 2s
-    const delay = Math.min(100 * Math.pow(2, connectionAttempts.current - 1), 2000)
-
-    reconnectTimeoutRef.current = setTimeout(() => {
-      if (ultraP2PRef.current) {
-        ultraP2PRef.current.forceReconnect()
-      }
-
-      // Reset reconnection flag after attempt
-      setTimeout(() => {
-        isReconnecting.current = false
-
-        // Continue trying with unlimited attempts
-        if (connectionStatus !== "connected" && connectionAttempts.current < 100) {
-          handleReconnect()
-        } else if (connectionAttempts.current >= 100) {
-          setError("Optimizing connection... The system continues trying automatically.")
-          // Reset attempts for continuous retry
-          setTimeout(() => {
-            connectionAttempts.current = 0
-          }, 10000)
-        }
-      }, 1000) // Reduced to 1 second
-    }, delay)
-  }
-
-  // Connection health monitoring
-  useEffect(() => {
-    connectionHealthTimer.current = setInterval(() => {
-      if (ultraP2PRef.current && !isReconnecting.current) {
-        // Check if connection needs recovery
-        const now = Date.now()
-        const timeSinceActivity = now - lastActivity.current
-
-        if (timeSinceActivity > 30000) {
-          // 30 seconds without activity
-          console.log("🔧 Connection health check - maintaining connection")
-          ultraP2PRef.current.maintainConnection()
-          lastActivity.current = now
-        }
-
-        // Auto-recovery if disconnected
-        if (connectionStatus !== "connected" || wsStatus !== "connected") {
-          console.log("🔧 Auto-recovery triggered")
-          handleReconnect()
-        }
-      }
-    }, 5000) // Check every 5 seconds
-
-    return () => {
-      if (connectionHealthTimer.current) {
-        clearInterval(connectionHealthTimer.current)
-      }
-    }
-  }, [connectionStatus, wsStatus])
-
-  // Initialize ultra-reliable P2P system with maximum performance
+  // Initialize bulletproof P2P
   useEffect(() => {
     if (!user || !sessionId) return
 
-    console.log("🚀 Initializing Ultra-Reliable P2P System v4.0")
+    console.log("🚀 Initializing Bulletproof P2P System")
 
-    const ultraP2P = new UltraReliableP2P(sessionId, user.id, {
-      // Ultra-enhanced configuration for maximum speed and reliability
-      maxReconnectAttempts: 1000, // Unlimited retries
-      reconnectDelay: 100, // Ultra-fast reconnection
-      heartbeatInterval: 1000, // 1 second heartbeat
-      connectionTimeout: 5000, // 5 second timeout
-      chunkSize: 2 * 1024 * 1024, // 2MB chunks for maximum speed
-      maxConcurrentChunks: 16, // 16 parallel transfers
-      enableCompression: false, // Disabled for maximum speed
-      enableResumableTransfers: true,
-      mobileOptimizations: true,
-      backgroundMode: false,
-    })
+    const p2p = new BulletproofP2P(sessionId, user.id)
+    p2pRef.current = p2p
 
-    ultraP2PRef.current = ultraP2P
-
-    // Core connection event handlers with instant response
-    ultraP2P.onConnectionStatusChange = (status) => {
+    // Set up event handlers
+    p2p.onConnectionStatusChange = (status) => {
       console.log(`🔗 Connection status: ${status}`)
       setConnectionStatus(status)
-      lastActivity.current = Date.now()
-
       if (status === "connected") {
-        connectionAttempts.current = 0
-        isReconnecting.current = false
-        if (reconnectTimeoutRef.current) {
-          clearTimeout(reconnectTimeoutRef.current)
-        }
-        setError("") // Clear any errors on successful connection
-      } else if (status === "disconnected" && !isReconnecting.current) {
-        // Instant auto-reconnect
-        setTimeout(() => handleReconnect(), 200)
+        setError("")
       }
     }
 
-    ultraP2P.onSignalingStatusChange = (status) => {
+    p2p.onSignalingStatusChange = (status) => {
       console.log(`📡 Signaling status: ${status}`)
       setWsStatus(status)
-      lastActivity.current = Date.now()
-
       if (status === "connected") {
-        setError("") // Clear errors on successful signaling connection
-      } else if ((status === "disconnected" || status === "error") && !isReconnecting.current) {
-        setTimeout(() => handleReconnect(), 100) // Instant signaling recovery
+        setError("")
       }
     }
 
-    ultraP2P.onUserCountChange = (count) => {
+    p2p.onUserCountChange = (count) => {
       setUserCount(count)
-      lastActivity.current = Date.now()
     }
 
-    ultraP2P.onError = (errorMsg) => {
+    p2p.onError = (errorMsg) => {
       console.error("❌ P2P Error:", errorMsg)
       setError(errorMsg)
-
-      // Auto-recovery for connection errors
-      if (errorMsg.includes("connection") || errorMsg.includes("signaling") || errorMsg.includes("timeout")) {
-        setTimeout(() => handleReconnect(), 500)
-      }
     }
 
-    ultraP2P.onConnectionQualityChange = (quality) => {
+    p2p.onConnectionQualityChange = (quality) => {
       setConnectionQuality(quality)
-      lastActivity.current = Date.now()
     }
 
-    ultraP2P.onSpeedUpdate = (speed) => {
+    p2p.onSpeedUpdate = (speed) => {
       setCurrentSpeed(speed)
-      lastActivity.current = Date.now()
     }
 
-    // File transfer event handlers
-    ultraP2P.onFileTransferUpdate = (transfers) => {
+    p2p.onFileTransferUpdate = (transfers) => {
       setFileTransfers(transfers)
-      lastActivity.current = Date.now()
     }
 
-    ultraP2P.onChatMessage = (message) => {
+    p2p.onChatMessage = (message) => {
       setChatMessages((prev) => [...prev, message])
-      lastActivity.current = Date.now()
     }
 
-    // Enhanced connection recovery
-    ultraP2P.onConnectionRecovery = () => {
-      console.log("✅ Connection recovered successfully")
+    p2p.onConnectionRecovery = () => {
+      console.log("✅ Connection recovered")
       setError("")
-      connectionAttempts.current = 0
-      isReconnecting.current = false
-      lastActivity.current = Date.now()
     }
 
-    // Initialize connection with instant retry logic
-    const initializeConnection = async () => {
-      try {
-        await ultraP2P.initialize()
-      } catch (error) {
-        console.error("❌ Failed to initialize P2P:", error)
-        setTimeout(() => handleReconnect(), 1000)
-      }
-    }
-
-    initializeConnection()
-
-    // Session management
-    NotificationManager.requestPermission()
-    SessionManager.createSession(sessionId)
-    startSessionTimer()
+    // Initialize connection
+    p2p.initialize()
 
     return () => {
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current)
-      }
-      if (visibilityTimeoutRef.current) {
-        clearTimeout(visibilityTimeoutRef.current)
-      }
-      if (connectionHealthTimer.current) {
-        clearInterval(connectionHealthTimer.current)
-      }
-
-      ultraP2P.destroy()
-
-      if (sessionTimerRef.current) {
-        clearInterval(sessionTimerRef.current)
-      }
+      p2p.destroy()
     }
   }, [user, sessionId])
 
-  // Enhanced mobile device detection
+  // Mobile detection
   useEffect(() => {
     const checkMobile = () => {
       const isMobileDevice =
         window.innerWidth < 768 ||
-        /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
-        "ontouchstart" in window ||
-        navigator.maxTouchPoints > 0
-
+        /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
       setIsMobile(isMobileDevice)
-
-      // Configure P2P for mobile with optimizations
-      if (ultraP2PRef.current && isMobileDevice) {
-        ultraP2PRef.current.configureMobileOptimizations(true)
-      }
     }
 
     checkMobile()
@@ -424,76 +135,26 @@ export default function SessionPage() {
     return () => window.removeEventListener("resize", checkMobile)
   }, [])
 
-  const startSessionTimer = () => {
-    sessionTimerRef.current = setInterval(() => {
-      const timeLeft = SessionManager.getTimeUntilExpiry(sessionId)
-      if (timeLeft <= 0) {
-        handleSessionExpiry()
-      }
-    }, 1000)
-  }
-
-  const handleSessionExpiry = () => {
-    SessionManager.expireSession(sessionId)
-    setError("Session has expired due to inactivity")
-    setTimeout(() => router.push("/"), 3000)
-  }
-
-  // Enhanced file handling with ultra-reliable connection preservation
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
     if (files.length > 0) {
       setPreviewFiles(files)
       setShowPreview(true)
-
-      // Maintain ultra-reliable connection during file selection
-      if (ultraP2PRef.current) {
-        ultraP2PRef.current.maintainConnection()
-      }
-
-      // Update activity timestamp
-      lastActivity.current = Date.now()
     }
     e.target.value = ""
   }
 
   const handlePreviewSend = async (files: File[]) => {
-    if (ultraP2PRef.current) {
-      // Ensure ultra-strong connection before sending
-      if (connectionStatus !== "connected") {
-        setError("Establishing ultra-reliable connection...")
-        handleReconnect()
-        
-        // Wait for connection before proceeding
-        const waitForConnection = () => {
-          return new Promise<void>((resolve) => {
-            const checkConnection = () => {
-              if ((connectionStatus as "connecting" | "connected" | "disconnected") === "connected") {
-                resolve()
-              } else {
-                setTimeout(checkConnection, 100)
-              }
-            }
-            checkConnection()
-          })
-        }
-
-        await waitForConnection()
-      }
-
-      // Maintain connection during transfer
-      ultraP2PRef.current.maintainConnection()
-      await ultraP2PRef.current.sendFiles(files)
-      lastActivity.current = Date.now()
+    if (p2pRef.current) {
+      await p2pRef.current.sendFiles(files)
     }
     setPreviewFiles([])
     setShowPreview(false)
   }
 
   const handleSendChatMessage = (content: string, type: "text" | "clipboard") => {
-    if (ultraP2PRef.current) {
-      ultraP2PRef.current.sendChatMessage(content, type, user?.firstName || "You")
-      lastActivity.current = Date.now()
+    if (p2pRef.current) {
+      p2pRef.current.sendChatMessage(content, type, user?.firstName || "You")
     }
   }
 
@@ -504,12 +165,30 @@ export default function SessionPage() {
     if (files.length > 0) {
       setPreviewFiles(files)
       setShowPreview(true)
+    }
+  }
 
-      // Maintain connection during drag and drop
-      if (ultraP2PRef.current) {
-        ultraP2PRef.current.maintainConnection()
-      }
-      lastActivity.current = Date.now()
+  const handleReconnect = () => {
+    if (p2pRef.current) {
+      p2pRef.current.destroy()
+      setTimeout(() => {
+        if (user && sessionId) {
+          const p2p = new BulletproofP2P(sessionId, user.id)
+          p2pRef.current = p2p
+          
+          // Reattach handlers
+          p2p.onConnectionStatusChange = (status) => setConnectionStatus(status)
+          p2p.onSignalingStatusChange = (status) => setWsStatus(status)
+          p2p.onUserCountChange = (count) => setUserCount(count)
+          p2p.onError = (errorMsg) => setError(errorMsg)
+          p2p.onConnectionQualityChange = (quality) => setConnectionQuality(quality)
+          p2p.onSpeedUpdate = (speed) => setCurrentSpeed(speed)
+          p2p.onFileTransferUpdate = (transfers) => setFileTransfers(transfers)
+          p2p.onChatMessage = (message) => setChatMessages((prev) => [...prev, message])
+          
+          p2p.initialize()
+        }
+      }, 1000)
     }
   }
 
@@ -527,7 +206,7 @@ export default function SessionPage() {
       case "poor":
         return "bg-red-500"
       default:
-        return "bg-green-500" // Default to excellent
+        return "bg-green-500"
     }
   }
 
@@ -623,8 +302,6 @@ export default function SessionPage() {
                 <CardTitle className="text-lg md:text-2xl font-black flex items-center gap-2">
                   <Upload className="w-5 md:w-6 h-5 md:h-6" />
                   SEND FILES
-                  {getAIScanner() && <Scan className="w-4 h-4 text-green-600" />}
-                  <Files className="w-4 h-4 text-blue-600" />
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -674,7 +351,7 @@ export default function SessionPage() {
                     />
                   </div>
                   <p className="text-xs md:text-sm font-bold mt-4 text-gray-600">
-                    Max 1GB per file • Multi-file support • AI Scanned • SHA-256 verified • Ultra-fast transfer
+                    Max 1GB per file • Multi-file support • Bulletproof transfer
                   </p>
                 </div>
               </CardContent>
@@ -708,7 +385,7 @@ export default function SessionPage() {
                       <div className="bg-yellow-200 p-4 md:p-6 border-4 border-black">
                         <div className="animate-spin w-6 md:w-8 h-6 md:h-8 border-4 border-black border-t-transparent rounded-full mx-auto mb-4"></div>
                         <p className="font-black text-base md:text-lg">CONNECTING TO SERVER...</p>
-                        <p className="font-bold text-sm md:text-base">Establishing ultra-fast connection</p>
+                        <p className="font-bold text-sm md:text-base">Establishing bulletproof connection</p>
                       </div>
                     )}
 
@@ -725,34 +402,26 @@ export default function SessionPage() {
                       <div className="bg-orange-200 p-4 md:p-6 border-4 border-black">
                         <div className="animate-spin w-6 md:w-8 h-6 md:h-8 border-4 border-black border-t-transparent rounded-full mx-auto mb-4"></div>
                         <p className="font-black text-base md:text-lg">ESTABLISHING P2P...</p>
-                        <p className="font-bold text-sm md:text-base">Ultra-fast connection setup</p>
-                        <Button
-                          onClick={handleReconnect}
-                          className="neubrutalism-button bg-orange-500 text-white mt-4 touch-target"
-                          size="sm"
-                        >
-                          <RefreshCw className="w-3 md:w-4 h-3 md:h-4 mr-1" />
-                          RETRY
-                        </Button>
+                        <p className="font-bold text-sm md:text-base">Bulletproof connection setup</p>
                       </div>
                     )}
 
                     {connectionStatus === "connected" && (
                       <div className="bg-green-200 p-4 md:p-6 border-4 border-black">
                         <CheckCircle className="w-10 md:w-12 h-10 md:h-12 mx-auto mb-4 text-green-600" />
-                        <p className="font-black text-base md:text-lg text-green-800">ULTRA-FAST CONNECTION!</p>
-                        <p className="font-bold text-sm md:text-base">Maximum speed • Zero packet loss</p>
+                        <p className="font-black text-base md:text-lg text-green-800">BULLETPROOF CONNECTION!</p>
+                        <p className="font-bold text-sm md:text-base">Maximum stability • Zero packet loss</p>
                         <p className="text-xs md:text-sm mt-2">
                           Quality: {connectionQuality} • Speed: {getSpeedDisplay()}
                         </p>
                       </div>
                     )}
 
-                    {(wsStatus === "disconnected" || wsStatus === "error") && (
+                    {(wsStatus === "disconnected" || connectionStatus === "disconnected") && (
                       <div className="bg-red-200 p-4 md:p-6 border-4 border-black">
                         <WifiOff className="w-10 md:w-12 h-10 md:h-12 mx-auto mb-4 text-red-600" />
                         <p className="font-black text-base md:text-lg text-red-800">CONNECTION ISSUE</p>
-                        <p className="font-bold mb-4 text-sm md:text-base">Auto-reconnecting instantly...</p>
+                        <p className="font-bold mb-4 text-sm md:text-base">Auto-reconnecting...</p>
                         <Button
                           onClick={handleReconnect}
                           className="neubrutalism-button bg-red-500 text-white touch-target"
@@ -775,7 +444,7 @@ export default function SessionPage() {
                 <CardHeader className="pb-3 md:pb-6">
                   <CardTitle className="text-lg md:text-2xl font-black flex items-center gap-2">
                     <FileText className="w-5 md:w-6 h-5 md:h-6" />
-                    ULTRA-FAST TRANSFERS
+                    BULLETPROOF TRANSFERS
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -802,12 +471,6 @@ export default function SessionPage() {
                                     : `${(transfer.speed / 1024 / 1024).toFixed(1)} MB/s`}
                               </span>
                             )}
-                            {transfer.checksum && (
-                              <Shield className="w-3 md:w-4 h-3 md:h-4 text-green-600 flex-shrink-0" />
-                            )}
-                            {transfer.scanResult && !transfer.scanResult.isRisky && (
-                              <Scan className="w-3 md:w-4 h-3 md:h-4 text-green-600 flex-shrink-0" />
-                            )}
                           </div>
                           <span
                             className={`px-2 py-1 text-xs font-bold border-2 border-black flex-shrink-0 ${
@@ -815,24 +478,14 @@ export default function SessionPage() {
                                 ? "bg-green-300"
                                 : transfer.status === "transferring"
                                   ? "bg-yellow-300"
-                                  : transfer.status === "scanning"
-                                    ? "bg-blue-300"
-                                    : transfer.status === "blocked"
-                                      ? "bg-red-400"
-                                      : transfer.status === "error"
-                                        ? "bg-red-300"
-                                        : "bg-gray-300"
+                                  : transfer.status === "error"
+                                    ? "bg-red-300"
+                                    : "bg-gray-300"
                             }`}
                           >
                             {transfer.status.toUpperCase()}
                           </span>
                         </div>
-
-                        {transfer.scanResult?.isRisky && (
-                          <div className="mb-2 p-2 bg-red-100 border border-red-400 text-red-700 text-xs">
-                            <strong>Blocked:</strong> {transfer.scanResult.reason}
-                          </div>
-                        )}
 
                         <div className="progress-bar">
                           <div className="progress-fill" style={{ width: `${transfer.progress}%` }} />
