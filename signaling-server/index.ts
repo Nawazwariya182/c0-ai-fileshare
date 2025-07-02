@@ -23,11 +23,10 @@ interface Session {
   connectionAttempts: number
   isStable: boolean
   qualityScore: number
-  ultraStable: boolean
-  stabilityChecks: number
+  rockSolid: boolean
 }
 
-class UltraStableSignalingServer {
+class RockSolidSignalingServer {
   private wss: WebSocketServer
   private sessions: Map<string, Session> = new Map()
   private userSessions: Map<WebSocket, string> = new Map()
@@ -37,18 +36,18 @@ class UltraStableSignalingServer {
     activeConnections: 0,
     reconnections: 0,
     errors: 0,
-    ultraStableConnections: 0,
+    rockSolidConnections: 0,
     stabilityScore: 100,
   }
 
   constructor(port = process.env.PORT || 8080) {
-    console.log("🚀 Initializing Ultra-Stable P2P Signaling Server v5.0...")
+    console.log("🚀 Initializing Rock-Solid P2P Signaling Server v6.0...")
     console.log(`🔧 Environment: ${process.env.NODE_ENV || "development"}`)
     console.log(`🌐 Port: ${port}`)
 
     this.server = createServer()
 
-    // Ultra-optimized CORS and request handling
+    // Enhanced CORS handling
     this.server.on("request", (req, res) => {
       const origin = req.headers.origin
       const allowedOrigins = [
@@ -80,12 +79,12 @@ class UltraStableSignalingServer {
         res.writeHead(200, { "Content-Type": "application/json" })
         res.end(
           JSON.stringify({
-            status: "ultra-stable",
+            status: "rock-solid",
             timestamp: new Date().toISOString(),
             sessions: this.sessions.size,
             connections: this.userSessions.size,
             uptime: process.uptime(),
-            version: "5.0.0-ultra-stable",
+            version: "6.0.0-rock-solid",
             stats: this.connectionStats,
             performance: {
               memoryUsage: process.memoryUsage(),
@@ -93,7 +92,7 @@ class UltraStableSignalingServer {
             },
             stability: {
               score: this.connectionStats.stabilityScore,
-              ultraStableConnections: this.connectionStats.ultraStableConnections,
+              rockSolidConnections: this.connectionStats.rockSolidConnections,
             },
           }),
         )
@@ -110,31 +109,31 @@ class UltraStableSignalingServer {
       res.end(JSON.stringify({ error: "Not Found" }))
     })
 
-    // Ultra-stable WebSocket server configuration
+    // Rock-solid WebSocket server configuration
     this.wss = new WebSocketServer({
       server: this.server,
       perMessageDeflate: {
         zlibDeflateOptions: {
-          level: 1, // Fastest compression
+          level: 1,
           chunkSize: 1024,
         },
-        threshold: 64, // Lower threshold for better performance
-        concurrencyLimit: 200, // Higher concurrency
+        threshold: 128,
+        concurrencyLimit: 100,
         serverMaxWindowBits: 12,
         clientMaxWindowBits: 12,
         serverNoContextTakeover: false,
         clientNoContextTakeover: false,
       },
-      maxPayload: 4 * 1024 * 1024 * 1024, // 4GB for large files
+      maxPayload: 4 * 1024 * 1024 * 1024, // 4GB
       clientTracking: true,
-      backlog: 5000, // Higher backlog for better connection handling
+      backlog: 2000,
       handleProtocols: (protocols) => {
         console.log("📡 WebSocket protocols:", protocols)
         return protocols[0] || false
       },
       verifyClient: (info) => {
         const origin = info.origin
-        console.log(`🔍 Verifying ultra-stable client from origin: ${origin}`)
+        console.log(`🔍 Verifying rock-solid client from origin: ${origin}`)
 
         if (!origin) return true
 
@@ -162,22 +161,22 @@ class UltraStableSignalingServer {
     this.wss.on("error", (error) => {
       console.error("❌ WebSocket Server error:", error)
       this.connectionStats.errors++
-      this.connectionStats.stabilityScore = Math.max(0, this.connectionStats.stabilityScore - 5)
+      this.connectionStats.stabilityScore = Math.max(0, this.connectionStats.stabilityScore - 3)
     })
 
-    // Ultra-stable session management
-    setInterval(this.cleanupSessions.bind(this), 10000) // Every 10 seconds
-    setInterval(this.optimizeConnections.bind(this), 2000) // Every 2 seconds
-    setInterval(this.monitorStability.bind(this), 1000) // Every 1 second
-    setInterval(this.logStats.bind(this), 30000) // Every 30 seconds
+    // Rock-solid session management with longer intervals for stability
+    setInterval(this.cleanupSessions.bind(this), 30000) // Every 30 seconds
+    setInterval(this.optimizeConnections.bind(this), 10000) // Every 10 seconds
+    setInterval(this.monitorStability.bind(this), 5000) // Every 5 seconds
+    setInterval(this.logStats.bind(this), 60000) // Every 60 seconds
 
     this.server.listen(port, "0.0.0.0", () => {
-      console.log(`✅ Ultra-Stable Signaling Server started successfully!`)
+      console.log(`✅ Rock-Solid Signaling Server started successfully!`)
       console.log(`📡 HTTP server: http://0.0.0.0:${port}`)
       console.log(`🔗 WebSocket server: ws://0.0.0.0:${port}`)
       console.log(`🌍 Health check: http://0.0.0.0:${port}/health`)
       console.log(`📊 Stats: http://0.0.0.0:${port}/stats`)
-      console.log(`🚀 Ready for ultra-stable connections`)
+      console.log(`🚀 Ready for rock-solid connections`)
       console.log("=".repeat(60))
     })
 
@@ -197,26 +196,25 @@ class UltraStableSignalingServer {
     process.on("SIGTERM", this.shutdown.bind(this))
     process.on("SIGINT", this.shutdown.bind(this))
 
-    console.log(`🔧 Ultra-Stable Configuration:`)
+    console.log(`🔧 Rock-Solid Configuration:`)
     console.log(`   - Max Payload: 4GB`)
-    console.log(`   - Compression: Ultra-fast`)
-    console.log(`   - Backlog: 5000 connections`)
-    console.log(`   - Auto-optimization: Real-time`)
-    console.log(`   - Stability monitoring: Continuous`)
-    console.log(`   - Zero-disconnection mode: Active`)
+    console.log(`   - Compression: Optimized`)
+    console.log(`   - Backlog: 2000 connections`)
+    console.log(`   - Auto-optimization: Stable intervals`)
+    console.log(`   - Stability monitoring: Enhanced`)
+    console.log(`   - Connection persistence: Maximum`)
   }
 
   private shutdown() {
-    console.log("\n🛑 Gracefully shutting down ultra-stable server...")
+    console.log("\n🛑 Gracefully shutting down rock-solid server...")
 
-    // Notify all clients with instant reconnection
     this.wss.clients.forEach((ws) => {
       if (ws.readyState === WebSocket.OPEN) {
         this.send(ws, {
           type: "server-shutdown",
-          message: "Server maintenance - reconnect in 3 seconds",
-          reconnectDelay: 3000,
-          ultraStable: true,
+          message: "Server maintenance - reconnect in 5 seconds",
+          reconnectDelay: 5000,
+          rockSolid: true,
         })
         ws.close(1000, "Server maintenance")
       }
@@ -230,7 +228,7 @@ class UltraStableSignalingServer {
     setTimeout(() => {
       console.log("⚠️ Force closing server")
       process.exit(1)
-    }, 2000)
+    }, 3000)
   }
 
   private handleConnection(ws: WebSocket, req: any) {
@@ -240,36 +238,36 @@ class UltraStableSignalingServer {
 
     this.connectionStats.totalConnections++
     this.connectionStats.activeConnections++
-    this.connectionStats.ultraStableConnections++
+    this.connectionStats.rockSolidConnections++
 
-    console.log(`🔗 New ultra-stable ${isMobile ? "mobile" : "desktop"} client: ${clientIP}`)
+    console.log(`🔗 New rock-solid ${isMobile ? "mobile" : "desktop"} client: ${clientIP}`)
     console.log(`   User-Agent: ${userAgent}`)
 
-    // Immediate ultra-stable connection confirmation
+    // Immediate rock-solid connection confirmation
     this.send(ws, {
       type: "connected",
-      message: "Ultra-stable connection established",
+      message: "Rock-solid connection established",
       timestamp: new Date().toISOString(),
-      serverVersion: "5.0.0-ultra-stable",
+      serverVersion: "6.0.0-rock-solid",
       features: [
-        "ultra-stable-transfer",
-        "instant-reconnect",
+        "rock-solid-transfer",
+        "stable-reconnect",
         "mobile-optimized",
         "resumable-transfers",
-        "zero-disconnection",
+        "persistent-connection",
       ],
       clientType: isMobile ? "mobile" : "desktop",
       optimizations: {
         compression: true,
-        instantReconnect: true,
+        stableReconnect: true,
         backgroundMode: isMobile,
         chunkOptimization: true,
-        maxSpeed: true,
-        ultraStable: true,
+        maxStability: true,
+        rockSolid: true,
       },
     })
 
-    // Enhanced message handling with ultra-stable processing
+    // Enhanced message handling with rock-solid processing
     ws.on("message", (data) => {
       try {
         const message = JSON.parse(data.toString())
@@ -290,18 +288,18 @@ class UltraStableSignalingServer {
     ws.on("error", (error) => {
       console.error(`❌ WebSocket error from ${clientIP}:`, error)
       this.connectionStats.errors++
-      this.connectionStats.stabilityScore = Math.max(0, this.connectionStats.stabilityScore - 2)
+      this.connectionStats.stabilityScore = Math.max(0, this.connectionStats.stabilityScore - 1)
       this.handleDisconnection(ws)
     })
 
-    // Ultra-stable ping/pong for instant responsiveness
-    const pingInterval = isMobile ? 1500 : 750 // Faster for all clients
+    // Rock-solid ping/pong with stable intervals
+    const pingInterval = isMobile ? 10000 : 5000 // Longer intervals for stability
     let missedPings = 0
-    const maxMissedPings = 1 // Reduced for faster detection
+    const maxMissedPings = 3 // More tolerance
 
     const pingTimer = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
-        ws.ping("ultra-stable-ping")
+        ws.ping("rock-solid-ping")
         missedPings++
 
         if (missedPings > maxMissedPings) {
@@ -315,9 +313,8 @@ class UltraStableSignalingServer {
     }, pingInterval)
 
     ws.on("pong", () => {
-      missedPings = 0 // Reset on successful pong
+      missedPings = 0
 
-      // Update user connection quality
       const sessionId = this.userSessions.get(ws)
       if (sessionId) {
         const session = this.sessions.get(sessionId)
@@ -333,7 +330,7 @@ class UltraStableSignalingServer {
       }
     })
 
-    // Ultra-stable connection timeout
+    // Rock-solid connection timeout with longer duration
     const connectionTimeout = setTimeout(
       () => {
         if (ws.readyState === WebSocket.OPEN) {
@@ -341,8 +338,8 @@ class UltraStableSignalingServer {
           ws.close(1008, "Connection timeout")
         }
       },
-      isMobile ? 60 * 60 * 1000 : 45 * 60 * 1000,
-    ) // Longer timeout for mobile
+      isMobile ? 120 * 60 * 1000 : 90 * 60 * 1000,
+    ) // 2 hours for mobile, 1.5 hours for desktop
 
     ws.on("close", () => {
       clearInterval(pingTimer)
@@ -383,9 +380,6 @@ class UltraStableSignalingServer {
       case "connection-quality":
         this.handleConnectionQuality(ws, message)
         break
-      case "stability-check":
-        this.handleStabilityCheck(ws, sessionId, userId)
-        break
       case "offer":
       case "answer":
       case "ice-candidate":
@@ -422,17 +416,16 @@ class UltraStableSignalingServer {
         connectionAttempts: 0,
         isStable: false,
         qualityScore: 100,
-        ultraStable: true,
-        stabilityChecks: 0,
+        rockSolid: true,
       }
       this.sessions.set(sessionId, session)
-      console.log(`🆕 Created ultra-stable session: ${sessionId}`)
+      console.log(`🆕 Created rock-solid session: ${sessionId}`)
     }
 
-    // Enhanced reconnection handling with instant recovery
+    // Enhanced reconnection handling
     const existingUser = session.users.get(userId)
     if (existingUser) {
-      console.log(`🔄 User ${userId} reconnecting - instant state recovery`)
+      console.log(`🔄 User ${userId} reconnecting - maintaining state`)
       existingUser.ws = ws
       existingUser.lastSeen = new Date()
       existingUser.connectionQuality = "excellent"
@@ -451,7 +444,7 @@ class UltraStableSignalingServer {
         reconnected: true,
         sessionState: "maintained",
         optimizations: this.getClientOptimizations(clientInfo),
-        ultraStable: true,
+        rockSolid: true,
         stabilityScore: session.qualityScore,
       })
 
@@ -462,14 +455,14 @@ class UltraStableSignalingServer {
           userId,
           userCount: session.users.size,
           connectionQuality: "excellent",
-          ultraStable: true,
+          rockSolid: true,
           stabilityScore: session.qualityScore,
         },
         ws,
       )
 
-      // Immediate connection stability check
-      setTimeout(() => this.checkConnectionStability(sessionId), 250)
+      // Stability check after reconnection
+      setTimeout(() => this.checkConnectionStability(sessionId), 2000)
       return
     }
 
@@ -516,17 +509,17 @@ class UltraStableSignalingServer {
         parallelTransfers: 16,
         resumableTransfers: true,
         compressionEnabled: true,
-        ultraStable: true,
-        zeroDisconnection: true,
+        rockSolid: true,
+        persistentConnection: true,
       },
       stabilityScore: session.qualityScore,
     })
 
     if (session.users.size === 2) {
-      console.log(`🚀 Session ${sessionId} ready - initiating ultra-stable P2P`)
+      console.log(`🚀 Session ${sessionId} ready - initiating rock-solid P2P`)
       session.isStable = true
 
-      // Ultra-stable connection initiation
+      // Rock-solid connection initiation with stable timing
       setTimeout(() => {
         this.broadcastToSession(
           sessionId,
@@ -535,28 +528,28 @@ class UltraStableSignalingServer {
             userId,
             userCount: session.users.size,
             readyForConnection: true,
-            ultraStable: true,
+            rockSolid: true,
             stabilityScore: session.qualityScore,
           },
           ws,
         )
 
-        // Immediate P2P initiation
+        // P2P initiation with stable delay
         setTimeout(() => {
           this.broadcastToSession(sessionId, {
             type: "initiate-connection",
             timestamp: Date.now(),
             mode: "ultra-stable",
             optimizations: {
-              fastConnect: true,
+              stableConnect: true,
               parallelNegotiation: true,
               mobileOptimized: true,
-              instantRecovery: true,
-              zeroDisconnection: true,
+              persistentRecovery: true,
+              rockSolid: true,
             },
           })
-        }, 10) // Ultra-stable initiation
-      }, 10)
+        }, 1000) // 1 second stable initiation
+      }, 500) // 500ms stable delay
     } else {
       this.broadcastToSession(
         sessionId,
@@ -564,7 +557,7 @@ class UltraStableSignalingServer {
           type: "user-joined",
           userId,
           userCount: session.users.size,
-          ultraStable: true,
+          rockSolid: true,
         },
         ws,
       )
@@ -589,7 +582,7 @@ class UltraStableSignalingServer {
       timestamp: Date.now(),
       serverTime: new Date().toISOString(),
       quality: "excellent",
-      ultraStable: true,
+      rockSolid: true,
       stabilityScore: this.connectionStats.stabilityScore,
     })
   }
@@ -609,7 +602,7 @@ class UltraStableSignalingServer {
     this.send(ws, {
       type: "heartbeat-ack",
       timestamp: Date.now(),
-      status: "ultra-stable",
+      status: "rock-solid",
       maintain: maintain,
       stabilityScore: this.connectionStats.stabilityScore,
     })
@@ -630,26 +623,7 @@ class UltraStableSignalingServer {
       type: "keep-alive-ack",
       timestamp: Date.now(),
       status: "maintained",
-      ultraStable: true,
-    })
-  }
-
-  private handleStabilityCheck(ws: WebSocket, sessionId: string, userId: string) {
-    const session = this.sessions.get(sessionId)
-    if (!session) return
-
-    session.stabilityChecks++
-    const user = session.users.get(userId)
-    if (user) {
-      user.isStable = true
-      user.lastSeen = new Date()
-    }
-
-    this.send(ws, {
-      type: "stability-ack",
-      timestamp: Date.now(),
-      stabilityScore: session.qualityScore,
-      ultraStable: true,
+      rockSolid: true,
     })
   }
 
@@ -672,7 +646,7 @@ class UltraStableSignalingServer {
   }
 
   private handleRetryConnection(ws: WebSocket, sessionId: string, userId: string) {
-    console.log(`🔄 Ultra-stable retry for ${userId} in session ${sessionId}`)
+    console.log(`🔄 Rock-solid retry for ${userId} in session ${sessionId}`)
 
     const session = this.sessions.get(sessionId)
     if (!session) {
@@ -683,24 +657,22 @@ class UltraStableSignalingServer {
     session.connectionAttempts++
     session.lastActivity = new Date()
 
-    // Enhanced retry with immediate response
     this.broadcastToSession(sessionId, {
       type: "retry-connection",
       userId,
       attempt: session.connectionAttempts,
       timestamp: Date.now(),
-      mode: "ultra-stable",
+      mode: "rock-solid",
       optimizations: {
         skipNegotiation: session.connectionAttempts > 1,
-        forceReconnect: true,
+        stableReconnect: true,
         parallelAttempt: true,
-        instantRecovery: true,
-        zeroDisconnection: true,
+        persistentRecovery: true,
+        rockSolid: true,
       },
     })
 
-    // Auto-stabilize after retry
-    setTimeout(() => this.checkConnectionStability(sessionId), 500)
+    setTimeout(() => this.checkConnectionStability(sessionId), 3000)
   }
 
   private relaySignalingMessage(ws: WebSocket, message: any) {
@@ -727,27 +699,25 @@ class UltraStableSignalingServer {
       }
     }
 
-    // Enhanced message relay with ultra-stable optimization
     const relayMessage = {
       ...message,
       senderId: userId,
       timestamp: Date.now(),
       serverProcessed: new Date().toISOString(),
       optimized: true,
-      priority: message.type === "ice-candidate" ? "ultra-high" : "high",
-      ultraStable: true,
+      priority: message.type === "ice-candidate" ? "high" : "normal",
+      rockSolid: true,
       stabilityScore: session.qualityScore,
     }
 
-    // Size check with higher limit for better performance
     const messageSize = JSON.stringify(relayMessage).length
-    if (messageSize > 100 * 1024 * 1024) {
-      // 100MB limit
+    if (messageSize > 50 * 1024 * 1024) {
+      // 50MB limit
       this.sendError(ws, "Message too large")
       return
     }
 
-    console.log(`🔄 Ultra-stable relay ${message.type} from ${userId} (${messageSize} bytes)`)
+    console.log(`🔄 Rock-solid relay ${message.type} from ${userId} (${messageSize} bytes)`)
     this.broadcastToSession(sessionId, relayMessage, ws)
   }
 
@@ -760,7 +730,6 @@ class UltraStableSignalingServer {
 
     session.lastActivity = new Date()
 
-    // Ultra-stable file chunk relay with minimal processing
     const relayMessage = {
       type: "file-chunk",
       chunkId: message.chunkId,
@@ -770,7 +739,7 @@ class UltraStableSignalingServer {
       total: message.total,
       timestamp: Date.now(),
       compressed: message.compressed || false,
-      ultraStable: true,
+      rockSolid: true,
     }
 
     this.broadcastToSession(sessionId, relayMessage, ws)
@@ -800,7 +769,7 @@ class UltraStableSignalingServer {
         sender: message.sender,
         messageType: message.messageType || "text",
         timestamp: Date.now(),
-        ultraStable: true,
+        rockSolid: true,
       },
       ws,
     )
@@ -818,7 +787,7 @@ class UltraStableSignalingServer {
     for (const [userId, userData] of session.users.entries()) {
       if (userData.ws === ws) {
         disconnectedUserId = userId
-        userData.lastSeen = new Date(Date.now() - 2000) // Mark as 2 seconds ago
+        userData.lastSeen = new Date(Date.now() - 5000) // Mark as 5 seconds ago
         userData.isStable = false
         break
       }
@@ -835,16 +804,16 @@ class UltraStableSignalingServer {
         temporary: true,
         timestamp: Date.now(),
         autoReconnect: true,
-        ultraStable: true,
+        rockSolid: true,
       })
 
-      // Ultra-stable cleanup with shorter grace period
+      // Rock-solid cleanup with extended grace period
       setTimeout(() => {
         const currentSession = this.sessions.get(sessionId)
         if (currentSession) {
           const user = currentSession.users.get(disconnectedUserId!)
-          if (user && Date.now() - user.lastSeen.getTime() > 15000) {
-            // 15 seconds grace period
+          if (user && Date.now() - user.lastSeen.getTime() > 60000) {
+            // 60 seconds grace period
             currentSession.users.delete(disconnectedUserId!)
             console.log(`🗑️ Removed inactive user ${disconnectedUserId}`)
 
@@ -862,7 +831,7 @@ class UltraStableSignalingServer {
             }
           }
         }
-      }, 15000) // 15 seconds
+      }, 60000) // 60 seconds
     }
   }
 
@@ -884,13 +853,13 @@ class UltraStableSignalingServer {
     session.isStable = stableConnections === session.users.size
 
     if (session.isStable) {
-      console.log(`✅ Session ${sessionId} is ultra-stable`)
+      console.log(`✅ Session ${sessionId} is rock-solid`)
       this.broadcastToSession(sessionId, {
         type: "connection-stable",
-        quality: "ultra-stable",
+        quality: "rock-solid",
         timestamp: Date.now(),
         stabilityScore: session.qualityScore,
-        ultraStable: true,
+        rockSolid: true,
       })
     }
   }
@@ -908,12 +877,12 @@ class UltraStableSignalingServer {
           activeUsers++
           const timeSinceLastPing = Date.now() - userData.lastPing
 
-          if (timeSinceLastPing < 2000 && userData.isStable) {
-            // < 2 seconds
+          if (timeSinceLastPing < 15000 && userData.isStable) {
+            // < 15 seconds
             userData.connectionQuality = "excellent"
             sessionStability += 100
-          } else if (timeSinceLastPing < 5000) {
-            // < 5 seconds
+          } else if (timeSinceLastPing < 30000) {
+            // < 30 seconds
             userData.connectionQuality = "good"
             sessionStability += 70
           } else {
@@ -930,19 +899,17 @@ class UltraStableSignalingServer {
         totalStability += avgStability
         stableSessions++
 
-        // Send stability updates to clients
-        if (avgStability < 80) {
+        if (avgStability < 70) {
           this.broadcastToSession(sessionId, {
             type: "optimize-connection",
-            quality: avgStability > 60 ? "good" : "poor",
-            suggestions: this.getOptimizationSuggestions(avgStability > 60 ? "good" : "poor"),
+            quality: avgStability > 50 ? "good" : "poor",
+            suggestions: this.getOptimizationSuggestions(avgStability > 50 ? "good" : "poor"),
             stabilityScore: avgStability,
           })
         }
       }
     })
 
-    // Update global stability score
     if (stableSessions > 0) {
       this.connectionStats.stabilityScore = Math.round(totalStability / stableSessions)
     }
@@ -954,13 +921,13 @@ class UltraStableSignalingServer {
         if (userData.ws.readyState === WebSocket.OPEN) {
           const timeSinceLastPing = Date.now() - userData.lastPing
 
-          if (timeSinceLastPing > 8000) {
-            // 8 seconds
+          if (timeSinceLastPing > 30000) {
+            // 30 seconds
             userData.connectionQuality = "poor"
             userData.isStable = false
             userData.missedPings++
-          } else if (timeSinceLastPing > 3000) {
-            // 3 seconds
+          } else if (timeSinceLastPing > 15000) {
+            // 15 seconds
             userData.connectionQuality = "good"
             userData.isStable = true
           } else {
@@ -968,7 +935,6 @@ class UltraStableSignalingServer {
             userData.isStable = true
           }
 
-          // Send optimization hints for maximum performance
           if (!userData.isStable) {
             this.send(userData.ws, {
               type: "optimize-connection",
@@ -989,37 +955,37 @@ class UltraStableSignalingServer {
           reduceChunkSize: true,
           enableCompression: true,
           increaseTimeout: true,
-          fallbackMode: true,
-          stabilityMode: true,
+          stableMode: true,
+          rockSolid: true,
         }
       case "good":
         return {
           maintainChunkSize: true,
           enableCompression: false,
           normalTimeout: true,
-          stabilityMode: false,
+          stableMode: false,
         }
       default:
         return {
           maxPerformance: true,
           parallelTransfers: true,
           largeChunks: true,
-          ultraStable: true,
-          zeroDisconnection: true,
+          rockSolid: true,
+          persistentConnection: true,
         }
     }
   }
 
   private getClientOptimizations(clientInfo: any) {
     return {
-      chunkSize: clientInfo?.isMobile ? 1024 * 1024 : 2 * 1024 * 1024, // 1MB for mobile, 2MB for desktop
+      chunkSize: clientInfo?.isMobile ? 1024 * 1024 : 2 * 1024 * 1024,
       compression: clientInfo?.isMobile ? true : false,
-      heartbeatInterval: clientInfo?.isMobile ? 1500 : 750,
-      reconnectDelay: clientInfo?.isMobile ? 100 : 50,
+      heartbeatInterval: clientInfo?.isMobile ? 10000 : 5000,
+      reconnectDelay: clientInfo?.isMobile ? 2000 : 1000,
       backgroundMode: clientInfo?.isMobile ? true : false,
       parallelTransfers: clientInfo?.isMobile ? 8 : 16,
-      ultraStable: true,
-      zeroDisconnection: true,
+      rockSolid: true,
+      persistentConnection: true,
     }
   }
 
@@ -1043,7 +1009,7 @@ class UltraStableSignalingServer {
     })
 
     if (sentCount > 0) {
-      console.log(`📡 Ultra-stable broadcast ${message.type} to ${sentCount} users`)
+      console.log(`📡 Rock-solid broadcast ${message.type} to ${sentCount} users`)
     }
   }
 
@@ -1065,7 +1031,7 @@ class UltraStableSignalingServer {
       timestamp: Date.now(),
       serverTime: new Date().toISOString(),
       recoverable: true,
-      ultraStable: true,
+      rockSolid: true,
     })
   }
 
@@ -1076,18 +1042,17 @@ class UltraStableSignalingServer {
     this.sessions.forEach((session, sessionId) => {
       const inactiveTime = now.getTime() - session.lastActivity.getTime()
 
-      // Longer timeout for stable sessions
-      const timeoutDuration = session.isStable ? 90 * 60 * 1000 : 45 * 60 * 1000 // 90 or 45 minutes
+      // Extended timeout for rock-solid sessions
+      const timeoutDuration = session.isStable ? 180 * 60 * 1000 : 120 * 60 * 1000 // 3 or 2 hours
 
       if (inactiveTime > timeoutDuration) {
         expiredSessions.push(sessionId)
       } else {
-        // Clean up inactive users
         const inactiveUsers: string[] = []
         session.users.forEach((userData, userId) => {
           const userInactiveTime = now.getTime() - userData.lastSeen.getTime()
-          if (userInactiveTime > 15 * 60 * 1000) {
-            // 15 minutes
+          if (userInactiveTime > 60 * 60 * 1000) {
+            // 60 minutes
             inactiveUsers.push(userId)
           }
         })
@@ -1110,7 +1075,7 @@ class UltraStableSignalingServer {
           this.send(userData.ws, {
             type: "session-expired",
             message: "Session expired - please reconnect",
-            reconnectDelay: 2000,
+            reconnectDelay: 5000,
           })
           userData.ws.close(1000, "Session expired")
         })
@@ -1123,13 +1088,13 @@ class UltraStableSignalingServer {
   private logStats() {
     if (this.sessions.size > 0 || this.connectionStats.activeConnections > 0) {
       console.log(
-        `📊 Ultra-Stable Stats: ${this.sessions.size} sessions, ${this.connectionStats.activeConnections} connections`,
+        `📊 Rock-Solid Stats: ${this.sessions.size} sessions, ${this.connectionStats.activeConnections} connections`,
       )
       console.log(
         `   Total: ${this.connectionStats.totalConnections}, Reconnects: ${this.connectionStats.reconnections}, Errors: ${this.connectionStats.errors}`,
       )
       console.log(
-        `   Ultra-Stable Connections: ${this.connectionStats.ultraStableConnections}, Stability Score: ${this.connectionStats.stabilityScore}%`,
+        `   Rock-Solid Connections: ${this.connectionStats.rockSolidConnections}, Stability Score: ${this.connectionStats.stabilityScore}%`,
       )
     }
   }
@@ -1146,8 +1111,7 @@ class UltraStableSignalingServer {
         userCount: session.users.size,
         isStable: session.isStable,
         qualityScore: session.qualityScore,
-        ultraStable: session.ultraStable,
-        stabilityChecks: session.stabilityChecks,
+        rockSolid: session.rockSolid,
         activeUsers: Array.from(session.users.values()).filter((u) => u.ws.readyState === WebSocket.OPEN).length,
         users: Array.from(session.users.entries()).map(([userId, userData]) => ({
           userId,
@@ -1169,7 +1133,7 @@ class UltraStableSignalingServer {
   }
 }
 
-// Enhanced port checking and startup
+// Enhanced startup
 async function checkPort(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const server = createServer()
@@ -1197,14 +1161,13 @@ async function startServer() {
     }
 
     console.log(`✅ Port ${port} is available`)
-    new UltraStableSignalingServer(Number(port))
+    new RockSolidSignalingServer(Number(port))
   } catch (error) {
     console.error("❌ Startup error:", error)
     process.exit(1)
   }
 }
 
-// Enhanced error handling
 process.on("uncaughtException", (error) => {
   console.error("💥 Uncaught Exception:", error)
   process.exit(1)
@@ -1217,4 +1180,4 @@ process.on("unhandledRejection", (reason, promise) => {
 
 startServer()
 
-export default UltraStableSignalingServer
+export default RockSolidSignalingServer

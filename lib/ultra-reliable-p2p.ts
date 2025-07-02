@@ -1,4 +1,4 @@
-// Ultra-Stable P2P Connection System - Zero Disconnection Edition
+// Rock-Solid P2P Connection System - Permanent Connection Edition
 
 interface ConnectionStats {
   latency: number
@@ -57,13 +57,10 @@ export class UltraReliableP2P {
   private userId: string
   private config: P2PConfig
 
-  // Core connection components with redundancy
+  // Core connection components
   private ws: WebSocket | null = null
-  private wsBackup: WebSocket | null = null
   private pc: RTCPeerConnection | null = null
-  private pcBackup: RTCPeerConnection | null = null
   private dataChannel: RTCDataChannel | null = null
-  private dataChannelBackup: RTCDataChannel | null = null
 
   // Connection state management
   private isInitiator = false
@@ -74,7 +71,7 @@ export class UltraReliableP2P {
   private connectionState: "connecting" | "connected" | "disconnected" = "connecting"
   private signalingState: "connecting" | "connected" | "disconnected" | "error" = "connecting"
 
-  // Ultra-stable connection handling
+  // Rock-solid connection handling
   private wsUrls: string[] = []
   private currentUrlIndex = 0
   private iceCandidateQueue: ICECandidate[] = []
@@ -104,24 +101,23 @@ export class UltraReliableP2P {
     }
   > = new Map()
 
-  // Ultra-stable timing and performance
+  // Rock-solid timing and performance
   private heartbeatInterval: NodeJS.Timeout | null = null
   private reconnectTimeout: NodeJS.Timeout | null = null
   private connectionTimeout: NodeJS.Timeout | null = null
   private statsInterval: NodeJS.Timeout | null = null
   private performanceMonitor: NodeJS.Timeout | null = null
   private keepAliveInterval: NodeJS.Timeout | null = null
-  private stabilityMonitor: NodeJS.Timeout | null = null
-  private redundancyChecker: NodeJS.Timeout | null = null
+  private connectionGuard: NodeJS.Timeout | null = null
 
-  // Ultra-optimized buffer management
+  // Buffer management
   private sendBuffer: Map<string, ArrayBuffer[]> = new Map()
   private maxBufferSize = 64 * 1024 * 1024 // 64MB buffer
   private optimalChunkSize = 2 * 1024 * 1024 // 2MB chunks
   private maxConcurrentTransfers = 16
   private adaptiveChunkSize = true
 
-  // Connection quality monitoring with instant feedback
+  // Connection quality monitoring
   private latencyHistory: number[] = []
   private throughputHistory: number[] = []
   private lastPingTime = 0
@@ -131,7 +127,7 @@ export class UltraReliableP2P {
   private stableConnectionTime = 0
   private lastSuccessfulConnection = 0
 
-  // Mobile and background handling with ultra-persistence
+  // Mobile and background handling
   private visibilityState = "visible"
   private lastActivityTime = Date.now()
   private backgroundReconnectAttempts = 0
@@ -139,13 +135,13 @@ export class UltraReliableP2P {
   private connectionPersistence = true
   private mobileOptimized = false
 
-  // Zero-disconnection system
-  private stabilityQueue: (() => void)[] = []
-  private isStabilizing = false
+  // Rock-solid connection protection
+  private isConnecting = false
+  private connectionLock = false
   private lastDisconnectTime = 0
   private disconnectCount = 0
-  private connectionLocks = new Set<string>()
-  private redundantConnections = new Map<string, any>()
+  private forceStayConnected = true
+  private connectionHealthy = false
 
   // Event handlers
   public onConnectionStatusChange: ((status: "connecting" | "connected" | "disconnected") => void) | null = null
@@ -164,12 +160,12 @@ export class UltraReliableP2P {
     this.userId = userId
     this.config = {
       maxReconnectAttempts: 999999, // Unlimited retries
-      reconnectDelay: 50, // Ultra-fast reconnection
-      heartbeatInterval: 500, // 500ms heartbeat for ultra-stability
-      connectionTimeout: 3000, // 3 second timeout
+      reconnectDelay: 1000, // 1 second delay to prevent spam
+      heartbeatInterval: 5000, // 5 second heartbeat - more stable
+      connectionTimeout: 10000, // 10 second timeout
       chunkSize: 2 * 1024 * 1024, // 2MB chunks
       maxConcurrentChunks: 16,
-      enableCompression: false, // Disabled for speed
+      enableCompression: false,
       enableResumableTransfers: true,
       mobileOptimizations: true,
       backgroundMode: false,
@@ -180,7 +176,7 @@ export class UltraReliableP2P {
     this.maxConcurrentTransfers = this.config.maxConcurrentChunks!
 
     this.initializeUrls()
-    this.setupZeroDisconnectionSystem()
+    this.setupConnectionGuard()
     this.setupPerformanceMonitoring()
     this.setupMobileHandlers()
   }
@@ -193,7 +189,7 @@ export class UltraReliableP2P {
       this.wsUrls.push(process.env.NEXT_PUBLIC_WS_URL)
     }
 
-    // Production fallbacks with geographic distribution
+    // Production fallbacks
     if (process.env.NODE_ENV === "production") {
       this.wsUrls.push(
         "wss://signaling-server-1ckx.onrender.com",
@@ -201,314 +197,102 @@ export class UltraReliableP2P {
         "wss://reliable-signaling.railway.app",
         "wss://ws-signaling.fly.dev",
         "wss://signaling.vercel.app",
-        "wss://ws.postman-echo.com/raw", // Additional fallback
       )
     } else {
       // Development URLs
-      this.wsUrls.push(
-        "ws://localhost:8080",
-        "ws://127.0.0.1:8080",
-        "ws://0.0.0.0:8080",
-        "ws://192.168.1.100:8080",
-        "ws://10.0.0.100:8080",
-      )
+      this.wsUrls.push("ws://localhost:8080", "ws://127.0.0.1:8080", "ws://0.0.0.0:8080")
     }
 
-    // Remove duplicates and shuffle for load balancing
+    // Remove duplicates
     this.wsUrls = [...new Set(this.wsUrls)]
-    console.log("🚀 Initialized ultra-stable signaling URLs:", this.wsUrls.length)
+    console.log("🚀 Initialized rock-solid signaling URLs:", this.wsUrls.length)
   }
 
-  private setupZeroDisconnectionSystem() {
-    // Ultra-stable monitoring system that prevents disconnections
-    this.stabilityMonitor = setInterval(() => {
+  private setupConnectionGuard() {
+    // Rock-solid connection guard that prevents disconnections
+    this.connectionGuard = setInterval(() => {
       if (this.isDestroyed) return
 
-      // Check all connection components every 50ms
-      this.checkAllConnectionHealth()
+      // Check connection health every 2 seconds
+      this.checkConnectionHealth()
 
-      // Instant stabilization if needed
-      if (this.shouldTriggerStabilization()) {
-        this.triggerInstantStabilization()
+      // Maintain connection if needed
+      if (this.shouldMaintainConnection()) {
+        this.maintainConnection()
       }
 
-      // Process stability queue
-      this.processStabilityQueue()
-    }, 50) // 50ms ultra-fast monitoring
-
-    // Redundancy checker for backup connections
-    this.redundancyChecker = setInterval(() => {
-      this.maintainRedundantConnections()
-    }, 1000) // Every second
+      // Auto-reconnect if disconnected
+      if (this.shouldAutoReconnect()) {
+        this.autoReconnect()
+      }
+    }, 2000) // 2 second monitoring
   }
 
-  private checkAllConnectionHealth(): boolean {
+  private checkConnectionHealth(): boolean {
     const wsHealthy = this.ws?.readyState === WebSocket.OPEN
     const p2pHealthy = this.pc?.connectionState === "connected"
     const dataChannelHealthy = this.dataChannel?.readyState === "open"
 
-    // Check backup connections
-    const wsBackupHealthy = this.wsBackup?.readyState === WebSocket.OPEN
-    const p2pBackupHealthy = this.pcBackup?.connectionState === "connected"
+    this.connectionHealthy = wsHealthy && this.signalingState === "connected"
 
-    const primaryHealthy = wsHealthy && p2pHealthy && dataChannelHealthy
-    const backupAvailable = wsBackupHealthy || p2pBackupHealthy
-
-    // Update connection states based on health
-    if (primaryHealthy) {
-      if (this.signalingState !== "connected") {
-        this.signalingState = "connected"
-        this.onSignalingStatusChange?.("connected")
-      }
-      if (this.connectionState !== "connected") {
-        this.connectionState = "connected"
-        this.onConnectionStatusChange?.("connected")
-      }
+    // Update connection states
+    if (wsHealthy && this.signalingState !== "connected") {
+      this.signalingState = "connected"
+      this.onSignalingStatusChange?.("connected")
       this.lastSuccessfulConnection = Date.now()
-    } else if (backupAvailable) {
-      // Switch to backup if primary fails
-      this.switchToBackupConnections()
-    } else if (!this.isStabilizing) {
-      // Trigger stabilization if no healthy connections
-      this.triggerInstantStabilization()
     }
 
-    return primaryHealthy || backupAvailable
+    if (p2pHealthy && dataChannelHealthy && this.connectionState !== "connected") {
+      this.connectionState = "connected"
+      this.onConnectionStatusChange?.("connected")
+      this.lastSuccessfulConnection = Date.now()
+    }
+
+    return this.connectionHealthy
   }
 
-  private shouldTriggerStabilization(): boolean {
+  private shouldMaintainConnection(): boolean {
     const now = Date.now()
+    const timeSinceLastActivity = now - this.lastActivityTime
     const timeSinceLastSuccess = now - this.lastSuccessfulConnection
+
+    // Maintain connection if:
+    // 1. No activity in last 10 seconds
+    // 2. No successful connection in last 5 seconds
+    return this.forceStayConnected && (timeSinceLastActivity > 10000 || timeSinceLastSuccess > 5000)
+  }
+
+  private shouldAutoReconnect(): boolean {
+    const now = Date.now()
     const timeSinceLastDisconnect = now - this.lastDisconnectTime
 
-    // Trigger stabilization if:
-    // 1. No successful connection in last 1 second
-    // 2. Multiple disconnects in short time
-    // 3. Connection state is inconsistent
+    // Auto-reconnect if:
+    // 1. Not currently connecting
+    // 2. Connection is not healthy
+    // 3. Enough time has passed since last disconnect
     return (
-      timeSinceLastSuccess > 1000 ||
-      (this.disconnectCount > 1 && timeSinceLastDisconnect < 3000) ||
-      (this.signalingState === "connected" && this.connectionState !== "connected") ||
-      (this.connectionState === "connected" && this.signalingState !== "connected")
+      !this.isConnecting &&
+      !this.connectionHealthy &&
+      timeSinceLastDisconnect > this.config.reconnectDelay! &&
+      this.forceStayConnected
     )
   }
 
-  private triggerInstantStabilization() {
-    if (this.isStabilizing) return
+  private autoReconnect() {
+    if (this.isConnecting || this.connectionLock) return
 
-    this.isStabilizing = true
-    console.log("⚡ Triggering instant stabilization")
-
-    // Add stabilization actions to queue
-    this.stabilityQueue.push(() => this.stabilizeSignalingConnection())
-    this.stabilityQueue.push(() => this.stabilizeP2PConnection())
-    this.stabilityQueue.push(() => this.stabilizeDataChannel())
-    this.stabilityQueue.push(() => this.createBackupConnections())
-
-    // Reset stabilization flag
-    setTimeout(() => {
-      this.isStabilizing = false
-    }, 500)
-  }
-
-  private processStabilityQueue() {
-    if (this.stabilityQueue.length > 0 && !this.isStabilizing) {
-      const stabilityAction = this.stabilityQueue.shift()
-      if (stabilityAction) {
-        stabilityAction()
-      }
-    }
-  }
-
-  private stabilizeSignalingConnection() {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      console.log("🔄 Stabilizing signaling connection")
-      this.establishSignalingConnection()
-    }
-  }
-
-  private stabilizeP2PConnection() {
-    if (!this.pc || this.pc.connectionState !== "connected") {
-      console.log("🔄 Stabilizing P2P connection")
-      if (this.isInitiator) {
-        setTimeout(() => this.initiateP2PConnection(), 50)
-      }
-    }
-  }
-
-  private stabilizeDataChannel() {
-    if (!this.dataChannel || this.dataChannel.readyState !== "open") {
-      console.log("🔄 Stabilizing data channel")
-      this.attemptDataChannelRecovery()
-    }
-  }
-
-  private createBackupConnections() {
-    // Create backup WebSocket connection
-    if (!this.wsBackup || this.wsBackup.readyState !== WebSocket.OPEN) {
-      this.createBackupWebSocket()
-    }
-
-    // Create backup P2P connection if primary is unstable
-    if (this.pc && this.pc.connectionState !== "connected" && !this.pcBackup) {
-      this.createBackupP2PConnection()
-    }
-  }
-
-  private createBackupWebSocket() {
-    if (this.wsUrls.length > 1) {
-      const backupUrlIndex = (this.currentUrlIndex + 1) % this.wsUrls.length
-      const backupUrl = this.wsUrls[backupUrlIndex]
-
-      try {
-        this.wsBackup = new WebSocket(backupUrl)
-
-        this.wsBackup.onopen = () => {
-          console.log(`✅ Backup WebSocket connected to ${backupUrl}`)
-          // Send join message to backup
-          this.sendBackupSignalingMessage({
-            type: "join",
-            sessionId: this.sessionId,
-            userId: this.userId,
-            backup: true,
-          })
-        }
-
-        this.wsBackup.onmessage = (event) => {
-          // Handle backup messages
-          try {
-            const message = JSON.parse(event.data)
-            this.handleSignalingMessage(message)
-          } catch (error) {
-            console.error("❌ Error parsing backup message:", error)
-          }
-        }
-
-        this.wsBackup.onclose = () => {
-          console.log("🔌 Backup WebSocket closed")
-          this.wsBackup = null
-        }
-
-        this.wsBackup.onerror = (error) => {
-          console.error("❌ Backup WebSocket error:", error)
-          this.wsBackup = null
-        }
-      } catch (error) {
-        console.error("❌ Failed to create backup WebSocket:", error)
-      }
-    }
-  }
-
-  private createBackupP2PConnection() {
-    try {
-      this.pcBackup = new RTCPeerConnection(this.getOptimizedRTCConfiguration())
-
-      this.pcBackup.onconnectionstatechange = () => {
-        if (this.pcBackup?.connectionState === "connected") {
-          console.log("✅ Backup P2P connection established")
-        }
-      }
-
-      this.pcBackup.ondatachannel = (event) => {
-        this.dataChannelBackup = event.channel
-        this.setupBackupDataChannelHandlers()
-      }
-    } catch (error) {
-      console.error("❌ Failed to create backup P2P connection:", error)
-    }
-  }
-
-  private switchToBackupConnections() {
-    console.log("🔄 Switching to backup connections")
-
-    // Switch WebSocket
-    if (this.wsBackup?.readyState === WebSocket.OPEN) {
-      const oldWs = this.ws
-      this.ws = this.wsBackup
-      this.wsBackup = null
-      oldWs?.close()
-
-      this.signalingState = "connected"
-      this.onSignalingStatusChange?.("connected")
-    }
-
-    // Switch P2P connection
-    if (this.pcBackup?.connectionState === "connected") {
-      const oldPc = this.pc
-      this.pc = this.pcBackup
-      this.pcBackup = null
-      oldPc?.close()
-    }
-
-    // Switch data channel
-    if (this.dataChannelBackup?.readyState === "open") {
-      const oldChannel = this.dataChannel
-      this.dataChannel = this.dataChannelBackup
-      this.dataChannelBackup = null
-      oldChannel?.close()
-
-      this.connectionState = "connected"
-      this.onConnectionStatusChange?.("connected")
-    }
-
-    this.lastSuccessfulConnection = Date.now()
-    this.onConnectionRecovery?.()
-  }
-
-  private maintainRedundantConnections() {
-    // Ensure we always have backup connections ready
-    if (this.connectionState === "connected" || this.signalingState === "connected") {
-      this.createBackupConnections()
-    }
-
-    // Clean up failed backup connections
-    if (this.wsBackup && this.wsBackup.readyState === WebSocket.CLOSED) {
-      this.wsBackup = null
-    }
-
-    if (this.pcBackup && this.pcBackup.connectionState === "closed") {
-      this.pcBackup = null
-    }
-  }
-
-  private setupBackupDataChannelHandlers() {
-    if (!this.dataChannelBackup) return
-
-    this.dataChannelBackup.binaryType = "arraybuffer"
-
-    this.dataChannelBackup.onopen = () => {
-      console.log("📡 Backup data channel opened")
-    }
-
-    this.dataChannelBackup.onmessage = (event) => {
-      this.handleDataChannelMessage(event.data)
-    }
-
-    this.dataChannelBackup.onclose = () => {
-      console.log("📡 Backup data channel closed")
-      this.dataChannelBackup = null
-    }
+    console.log("🔄 Auto-reconnecting...")
+    this.reconnectAttempts++
+    this.establishSignalingConnection()
   }
 
   private setupPerformanceMonitoring() {
-    // Ultra-fast performance monitoring every 100ms
+    // Performance monitoring every 5 seconds
     this.performanceMonitor = setInterval(() => {
       this.updateConnectionStats()
       this.adaptChunkSize()
       this.monitorBufferHealth()
-      this.optimizeForSpeed()
-    }, 100)
-  }
-
-  private optimizeForSpeed() {
-    // Dynamic optimization based on current performance
-    if (this.connectionStats.quality === "excellent") {
-      this.optimalChunkSize = Math.min(4 * 1024 * 1024, this.optimalChunkSize * 1.05) // Up to 4MB
-      this.maxConcurrentTransfers = Math.min(32, this.maxConcurrentTransfers + 1)
-    } else if (this.connectionStats.quality === "poor") {
-      this.optimalChunkSize = Math.max(512 * 1024, this.optimalChunkSize * 0.95) // Down to 512KB
-      this.maxConcurrentTransfers = Math.max(4, this.maxConcurrentTransfers - 1)
-    }
+    }, 5000)
   }
 
   private setupMobileHandlers() {
@@ -517,40 +301,26 @@ export class UltraReliableP2P {
       this.mobileOptimized = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
 
       if (this.mobileOptimized) {
-        console.log("📱 Mobile device detected - enabling ultra-stable optimizations")
+        console.log("📱 Mobile device detected - enabling optimizations")
         this.enableMobileOptimizations()
       }
 
-      // Enhanced mobile lifecycle handling
+      // Mobile lifecycle handling
       document.addEventListener("visibilitychange", this.handleVisibilityChange.bind(this))
       window.addEventListener("beforeunload", this.handleBeforeUnload.bind(this))
       window.addEventListener("pagehide", this.handlePageHide.bind(this))
       window.addEventListener("pageshow", this.handlePageShow.bind(this))
       window.addEventListener("focus", this.handleFocus.bind(this))
       window.addEventListener("blur", this.handleBlur.bind(this))
-
-      // Mobile-specific file input handling
-      document.addEventListener("touchstart", this.handleTouchStart.bind(this))
-      document.addEventListener("touchend", this.handleTouchEnd.bind(this))
     }
   }
 
   private enableMobileOptimizations() {
-    // Optimize for mobile networks and battery
-    this.config.heartbeatInterval = 1000 // 1 second for mobile
+    // Optimize for mobile networks
+    this.config.heartbeatInterval = 10000 // 10 seconds for mobile
     this.optimalChunkSize = Math.min(this.optimalChunkSize, 1024 * 1024) // 1MB max for mobile
     this.maxConcurrentTransfers = Math.min(this.maxConcurrentTransfers, 8) // Reduce for mobile
-    this.connectionPersistence = true // Always maintain connection on mobile
-  }
-
-  private handleTouchStart() {
-    // Maintain connection during touch interactions
-    this.maintainConnection()
-  }
-
-  private handleTouchEnd() {
-    // Ensure connection stability after touch
-    setTimeout(() => this.checkAllConnectionHealth(), 50)
+    this.connectionPersistence = true
   }
 
   private handleVisibilityChange() {
@@ -564,8 +334,8 @@ export class UltraReliableP2P {
       this.enableBackgroundMode(false)
       setTimeout(() => {
         this.restoreConnectionState()
-        this.triggerInstantStabilization()
-      }, 25) // Ultra-fast recovery
+        this.maintainConnection()
+      }, 1000) // 1 second delay for stability
     }
   }
 
@@ -574,23 +344,23 @@ export class UltraReliableP2P {
   }
 
   private handlePageHide() {
-    console.log("📱 Page hidden - preserving ultra-stable state")
+    console.log("📱 Page hidden - preserving state")
     this.preserveConnectionState()
     this.enableBackgroundMode(true)
   }
 
   private handlePageShow() {
-    console.log("📱 Page shown - instant restoration")
+    console.log("📱 Page shown - restoring state")
     this.enableBackgroundMode(false)
     setTimeout(() => {
       this.restoreConnectionState()
-      this.triggerInstantStabilization()
-    }, 10) // Even faster restoration
+      this.maintainConnection()
+    }, 1000)
   }
 
   private handleFocus() {
     this.lastActivityTime = Date.now()
-    this.triggerInstantStabilization()
+    this.maintainConnection()
   }
 
   private handleBlur() {
@@ -605,17 +375,17 @@ export class UltraReliableP2P {
     console.log(`📱 Background mode: ${enabled ? "enabled" : "disabled"}`)
 
     if (enabled) {
-      // Maintain connection in background with aggressive keep-alive
+      // Maintain connection in background
       this.startKeepAlive()
       if (this.mobileOptimized) {
-        this.startHeartbeat(2000) // 2 seconds for mobile background
+        this.startHeartbeat(15000) // 15 seconds for mobile background
       }
     } else {
       // Resume normal operation
       this.stopKeepAlive()
       this.startHeartbeat(this.config.heartbeatInterval!)
-      // Immediate connection check
-      setTimeout(() => this.triggerInstantStabilization(), 50)
+      // Check connection after resuming
+      setTimeout(() => this.maintainConnection(), 2000)
     }
   }
 
@@ -629,25 +399,25 @@ export class UltraReliableP2P {
       connectionStats: { ...this.connectionStats },
       timestamp: Date.now(),
     }
-    console.log("💾 Ultra-stable state preserved")
+    console.log("💾 State preserved")
   }
 
   public restoreConnectionState() {
     if (this.preservedState && Date.now() - this.preservedState.timestamp < 600000) {
       // 10 minutes
       this.isInitiator = this.preservedState.isInitiator
-      this.connectionAttempts = Math.min(this.preservedState.connectionAttempts, 2)
+      this.connectionAttempts = Math.min(this.preservedState.connectionAttempts, 5)
       this.connectionStats = { ...this.preservedState.connectionStats }
 
       // Restore file transfers
       this.preservedState.fileTransfers.forEach(([id, transfer]: [string, FileTransfer]) => {
         if (transfer.status === "transferring") {
-          transfer.status = "pending" // Reset to retry
+          transfer.status = "pending"
         }
         this.fileTransfers.set(id, transfer)
       })
 
-      console.log("🔄 Ultra-stable state restored")
+      console.log("🔄 State restored")
       this.onConnectionRecovery?.()
     }
   }
@@ -655,19 +425,9 @@ export class UltraReliableP2P {
   public maintainConnection() {
     this.lastActivityTime = Date.now()
 
-    // Send immediate heartbeat to all connections
+    // Send heartbeat if connected
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.sendSignalingMessage({
-        type: "heartbeat",
-        sessionId: this.sessionId,
-        userId: this.userId,
-        timestamp: Date.now(),
-        maintain: true,
-      })
-    }
-
-    if (this.wsBackup?.readyState === WebSocket.OPEN) {
-      this.sendBackupSignalingMessage({
         type: "heartbeat",
         sessionId: this.sessionId,
         userId: this.userId,
@@ -679,13 +439,6 @@ export class UltraReliableP2P {
     // Ensure P2P connection is active
     if (this.dataChannel?.readyState === "open") {
       this.sendDataChannelMessage({
-        type: "keep-alive",
-        timestamp: Date.now(),
-      })
-    }
-
-    if (this.dataChannelBackup?.readyState === "open") {
-      this.sendBackupDataChannelMessage({
         type: "keep-alive",
         timestamp: Date.now(),
       })
@@ -705,13 +458,8 @@ export class UltraReliableP2P {
     this.keepAliveInterval = setInterval(() => {
       if (this.isBackgroundMode) {
         this.maintainConnection()
-
-        // Check and stabilize if needed
-        if (!this.checkAllConnectionHealth()) {
-          this.triggerInstantStabilization()
-        }
       }
-    }, 2000) // Every 2 seconds in background
+    }, 10000) // Every 10 seconds in background
   }
 
   private stopKeepAlive() {
@@ -722,32 +470,35 @@ export class UltraReliableP2P {
   }
 
   public async initialize() {
-    console.log("🚀 Initializing Ultra-Stable P2P System v5.0")
+    console.log("🚀 Initializing Rock-Solid P2P System v6.0")
     this.isDestroyed = false
+    this.forceStayConnected = true
     this.connectionState = "connecting"
     this.signalingState = "connecting"
     await this.establishSignalingConnection()
   }
 
   public destroy() {
-    console.log("🛑 Destroying Ultra-Stable P2P System")
+    console.log("🛑 Destroying Rock-Solid P2P System")
     this.isDestroyed = true
+    this.forceStayConnected = false
     this.cleanup()
   }
 
   public forceReconnect() {
-    console.log("🔄 Force reconnecting with instant stabilization")
+    console.log("🔄 Force reconnecting")
     this.cleanup()
     this.connectionAttempts = 0
     this.reconnectAttempts = 0
     this.currentUrlIndex = 0
     this.connectionState = "connecting"
     this.signalingState = "connecting"
-    setTimeout(() => this.initialize(), 25) // Ultra-fast restart
+    setTimeout(() => this.initialize(), 2000) // 2 second delay
   }
 
   public gracefulDisconnect() {
     console.log("👋 Graceful disconnect")
+    this.forceStayConnected = false
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.sendSignalingMessage({
         type: "disconnect",
@@ -768,8 +519,7 @@ export class UltraReliableP2P {
       this.statsInterval,
       this.performanceMonitor,
       this.keepAliveInterval,
-      this.stabilityMonitor,
-      this.redundancyChecker,
+      this.connectionGuard,
     ].forEach((timer) => {
       if (timer) {
         clearInterval(timer)
@@ -784,26 +534,16 @@ export class UltraReliableP2P {
     this.statsInterval = null
     this.performanceMonitor = null
     this.keepAliveInterval = null
-    this.stabilityMonitor = null
-    this.redundancyChecker = null
+    this.connectionGuard = null
 
-    // Close all connections gracefully
+    // Close connections gracefully
     if (this.pc) {
       this.pc.close()
       this.pc = null
     }
 
-    if (this.pcBackup) {
-      this.pcBackup.close()
-      this.pcBackup = null
-    }
-
     if (this.dataChannel) {
       this.dataChannel = null
-    }
-
-    if (this.dataChannelBackup) {
-      this.dataChannelBackup = null
     }
 
     if (this.ws) {
@@ -811,68 +551,80 @@ export class UltraReliableP2P {
       this.ws = null
     }
 
-    if (this.wsBackup) {
-      this.wsBackup.close(1000, "Clean disconnect")
-      this.wsBackup = null
-    }
-
     // Clear queues and buffers
     this.iceCandidateQueue = []
     this.sendBuffer.clear()
-    this.stabilityQueue = []
-    this.connectionLocks.clear()
-    this.redundantConnections.clear()
   }
 
   private async establishSignalingConnection() {
-    if (this.isDestroyed) return
+    if (this.isDestroyed || this.isConnecting || this.connectionLock) return
 
-    // Ultra-fast failover with immediate retry
+    this.isConnecting = true
+    this.connectionLock = true
+
+    // Reset if we've tried all URLs
     if (this.currentUrlIndex >= this.wsUrls.length) {
+      this.currentUrlIndex = 0
       this.onSignalingStatusChange?.("error")
       this.signalingState = "error"
 
-      // Immediate retry with minimal delay
-      const delay = Math.min(50 * Math.pow(1.1, this.reconnectAttempts), 1000)
+      // Wait before retrying
+      const delay = Math.min(this.config.reconnectDelay! * Math.pow(1.5, this.reconnectAttempts), 10000)
       this.reconnectAttempts++
 
-      console.log(`🔄 Ultra-fast retry in ${delay}ms (attempt ${this.reconnectAttempts})`)
+      console.log(`🔄 Retrying in ${delay}ms (attempt ${this.reconnectAttempts})`)
       this.reconnectTimeout = setTimeout(() => {
-        this.currentUrlIndex = 0
-        this.establishSignalingConnection()
+        this.connectionLock = false
+        this.isConnecting = false
+        if (this.forceStayConnected) {
+          this.establishSignalingConnection()
+        }
       }, delay)
       return
     }
 
     const wsUrl = this.wsUrls[this.currentUrlIndex]
-    console.log(`🚀 Ultra-stable connect to ${wsUrl}`)
+    console.log(`🚀 Connecting to ${wsUrl}`)
     this.onSignalingStatusChange?.("connecting")
     this.signalingState = "connecting"
 
     try {
+      // Close existing connection if any
+      if (this.ws) {
+        this.ws.close()
+        this.ws = null
+      }
+
       this.ws = new WebSocket(wsUrl)
 
-      // Ultra-fast connection timeout
+      // Connection timeout
       const connectionTimeout = setTimeout(() => {
         if (this.ws?.readyState === WebSocket.CONNECTING) {
-          console.log(`⏰ Ultra-fast timeout for ${wsUrl}`)
+          console.log(`⏰ Timeout for ${wsUrl}`)
           this.ws.close()
           this.currentUrlIndex++
-          setTimeout(() => this.establishSignalingConnection(), 10) // 10ms failover
+          this.connectionLock = false
+          this.isConnecting = false
+          if (this.forceStayConnected) {
+            setTimeout(() => this.establishSignalingConnection(), 1000)
+          }
         }
-      }, 2000) // 2 second timeout
+      }, this.config.connectionTimeout!)
 
       this.ws.onopen = () => {
         clearTimeout(connectionTimeout)
-        console.log(`✅ Ultra-stable connected to ${wsUrl}`)
+        console.log(`✅ Connected to ${wsUrl}`)
         this.onSignalingStatusChange?.("connected")
         this.signalingState = "connected"
         this.connectionAttempts = 0
         this.reconnectAttempts = 0
         this.currentUrlIndex = 0
         this.lastSuccessfulConnection = Date.now()
+        this.connectionLock = false
+        this.isConnecting = false
+        this.connectionHealthy = true
 
-        // Immediate join with enhanced capabilities
+        // Send join message
         this.sendSignalingMessage({
           type: "join",
           sessionId: this.sessionId,
@@ -887,17 +639,13 @@ export class UltraReliableP2P {
               concurrentTransfers: this.maxConcurrentTransfers,
               resumableTransfers: this.config.enableResumableTransfers,
               compression: this.config.enableCompression,
-              ultraStable: true,
-              zeroDisconnection: true,
+              rockSolid: true,
             },
           },
         })
 
         this.startHeartbeat()
         this.startStatsCollection()
-
-        // Create backup connection immediately
-        setTimeout(() => this.createBackupConnections(), 1000)
       }
 
       this.ws.onmessage = (event) => {
@@ -916,30 +664,41 @@ export class UltraReliableP2P {
         this.signalingState = "disconnected"
         this.lastDisconnectTime = Date.now()
         this.disconnectCount++
+        this.connectionHealthy = false
+        this.connectionLock = false
+        this.isConnecting = false
         this.stopHeartbeat()
         this.stopStatsCollection()
 
-        if (!this.isDestroyed && event.code !== 1000 && event.code !== 1001) {
-          // Check if backup is available
-          if (this.wsBackup?.readyState === WebSocket.OPEN) {
-            this.switchToBackupConnections()
-          } else {
-            // Immediate reconnection
-            setTimeout(() => this.establishSignalingConnection(), 25) // 25ms immediate retry
-          }
+        // Only reconnect if not destroyed and not a clean disconnect
+        if (!this.isDestroyed && this.forceStayConnected && event.code !== 1000) {
+          this.currentUrlIndex++
+          setTimeout(() => {
+            if (this.forceStayConnected) {
+              this.establishSignalingConnection()
+            }
+          }, this.config.reconnectDelay!)
         }
       }
 
       this.ws.onerror = (error) => {
         clearTimeout(connectionTimeout)
         console.error(`❌ WebSocket error on ${wsUrl}:`, error)
+        this.connectionLock = false
+        this.isConnecting = false
         this.currentUrlIndex++
-        setTimeout(() => this.establishSignalingConnection(), 25) // 25ms failover
+        if (this.forceStayConnected) {
+          setTimeout(() => this.establishSignalingConnection(), this.config.reconnectDelay!)
+        }
       }
     } catch (error) {
       console.error(`❌ Failed to create WebSocket for ${wsUrl}:`, error)
+      this.connectionLock = false
+      this.isConnecting = false
       this.currentUrlIndex++
-      setTimeout(() => this.establishSignalingConnection(), 25) // 25ms failover
+      if (this.forceStayConnected) {
+        setTimeout(() => this.establishSignalingConnection(), this.config.reconnectDelay!)
+      }
     }
   }
 
@@ -959,38 +718,9 @@ export class UltraReliableP2P {
         this.lastActivityTime = Date.now()
       } catch (error) {
         console.error("❌ Error sending signaling message:", error)
-        // Try backup connection
-        if (this.wsBackup?.readyState === WebSocket.OPEN) {
-          this.sendBackupSignalingMessage(message)
-        } else {
-          // Immediate recovery on send failure
-          setTimeout(() => this.triggerInstantStabilization(), 50)
-        }
       }
     } else {
-      // Try backup connection
-      if (this.wsBackup?.readyState === WebSocket.OPEN) {
-        this.sendBackupSignalingMessage(message)
-      } else {
-        // Queue message for when connection is restored
-        console.log("📤 Queueing message for when connection is restored")
-        setTimeout(() => {
-          if (this.ws?.readyState === WebSocket.OPEN) {
-            this.sendSignalingMessage(message)
-          }
-        }, 100)
-      }
-    }
-  }
-
-  private sendBackupSignalingMessage(message: any) {
-    if (this.wsBackup?.readyState === WebSocket.OPEN) {
-      try {
-        this.wsBackup.send(JSON.stringify(message))
-        this.lastActivityTime = Date.now()
-      } catch (error) {
-        console.error("❌ Error sending backup signaling message:", error)
-      }
+      console.log("📤 Cannot send message - WebSocket not open")
     }
   }
 
@@ -1007,12 +737,8 @@ export class UltraReliableP2P {
           userId: this.userId,
           timestamp: this.lastPingTime,
           quality: this.connectionStats.quality,
-          ultraStable: true,
+          rockSolid: true,
         })
-      } else if (!this.isDestroyed) {
-        // Immediate stabilization on heartbeat failure
-        console.log("💓 Heartbeat failed, instant stabilization")
-        this.triggerInstantStabilization()
       }
     }, heartbeatInterval)
   }
@@ -1028,7 +754,7 @@ export class UltraReliableP2P {
     this.stopStatsCollection()
     this.statsInterval = setInterval(() => {
       this.collectConnectionStats()
-    }, 250) // Every 250ms for real-time stats
+    }, 5000) // Every 5 seconds
   }
 
   private stopStatsCollection() {
@@ -1047,7 +773,6 @@ export class UltraReliableP2P {
         this.onUserCountChange?.(message.userCount)
         this.isInitiator = message.isInitiator
 
-        // Apply server optimizations immediately
         if (message.optimizations) {
           this.applyOptimizations(message.optimizations)
         }
@@ -1057,15 +782,14 @@ export class UltraReliableP2P {
         console.log(`👤 User joined! Count: ${message.userCount}`)
         this.onUserCountChange?.(message.userCount)
         if (this.isInitiator && message.userCount === 2) {
-          // Instant P2P initiation
-          setTimeout(() => this.initiateP2PConnection(), 10) // 10ms ultra-fast
+          setTimeout(() => this.initiateP2PConnection(), 2000) // 2 second delay
         }
         break
 
       case "initiate-connection":
-        if (message.mode === "ultra-reliable" && this.isInitiator) {
-          console.log("⚡ Ultra-stable connection mode activated")
-          setTimeout(() => this.initiateP2PConnection(), 5) // 5ms instant
+        if (message.mode === "ultra-stable" && this.isInitiator) {
+          console.log("⚡ Rock-solid connection mode activated")
+          setTimeout(() => this.initiateP2PConnection(), 1000) // 1 second delay
         }
         break
 
@@ -1074,7 +798,6 @@ export class UltraReliableP2P {
         break
 
       case "heartbeat-ack":
-        // Connection is healthy
         this.lastSuccessfulConnection = Date.now()
         break
 
@@ -1094,17 +817,10 @@ export class UltraReliableP2P {
         await this.handleIceCandidate(message.candidate)
         break
 
-      case "retry-connection":
-        if (message.mode === "ultra-fast") {
-          console.log("⚡ Ultra-fast retry requested")
-          setTimeout(() => this.triggerInstantStabilization(), 25)
-        }
-        break
-
       case "connection-stable":
-        console.log("✅ Connection confirmed ultra-stable by server")
+        console.log("✅ Connection confirmed stable by server")
         this.stableConnectionTime = Date.now()
-        this.disconnectCount = 0 // Reset disconnect counter
+        this.disconnectCount = 0
         break
 
       case "user-left":
@@ -1120,8 +836,6 @@ export class UltraReliableP2P {
       case "user-reconnected":
         console.log("🔄 Peer reconnected successfully")
         this.onUserCountChange?.(message.userCount)
-        // Immediate connection check
-        setTimeout(() => this.triggerInstantStabilization(), 50)
         break
 
       case "session-expired":
@@ -1141,34 +855,31 @@ export class UltraReliableP2P {
       case "error":
         console.error("❌ Signaling error:", message.message)
         this.onError?.(message.message)
-        if (message.recoverable) {
-          setTimeout(() => this.triggerInstantStabilization(), 250)
-        }
         break
     }
   }
 
   private applyOptimizations(optimizations: any) {
     if (optimizations.chunkSize) {
-      this.optimalChunkSize = Math.max(optimizations.chunkSize, 1024 * 1024) // Minimum 1MB
+      this.optimalChunkSize = Math.max(optimizations.chunkSize, 1024 * 1024)
     }
     if (optimizations.heartbeatInterval) {
-      this.startHeartbeat(Math.max(optimizations.heartbeatInterval, 500)) // Minimum 500ms
+      this.startHeartbeat(Math.max(optimizations.heartbeatInterval, 5000))
     }
     if (optimizations.parallelTransfers) {
-      this.maxConcurrentTransfers = Math.max(optimizations.parallelTransfers, 8) // Minimum 8
+      this.maxConcurrentTransfers = Math.max(optimizations.parallelTransfers, 8)
     }
-    console.log("⚙️ Applied ultra-stable optimizations:", optimizations)
+    console.log("⚙️ Applied optimizations:", optimizations)
   }
 
   private handleOptimizationSuggestions(message: any) {
     const suggestions = message.suggestions
     if (suggestions.maxPerformance) {
-      this.optimalChunkSize = Math.min(this.optimalChunkSize * 2, 4 * 1024 * 1024) // Up to 4MB
-      this.maxConcurrentTransfers = Math.min(this.maxConcurrentTransfers + 4, 32) // Up to 32
+      this.optimalChunkSize = Math.min(this.optimalChunkSize * 1.5, 4 * 1024 * 1024)
+      this.maxConcurrentTransfers = Math.min(this.maxConcurrentTransfers + 2, 32)
     }
     if (suggestions.reduceChunkSize) {
-      this.optimalChunkSize = Math.max(this.optimalChunkSize / 2, 512 * 1024) // Down to 512KB
+      this.optimalChunkSize = Math.max(this.optimalChunkSize / 1.5, 512 * 1024)
     }
     console.log("🎯 Applied performance suggestions for", message.quality, "connection")
   }
@@ -1183,7 +894,7 @@ export class UltraReliableP2P {
 
   private updateLatencyStats(latency: number) {
     this.latencyHistory.push(latency)
-    if (this.latencyHistory.length > 50) {
+    if (this.latencyHistory.length > 20) {
       this.latencyHistory.shift()
     }
 
@@ -1195,39 +906,31 @@ export class UltraReliableP2P {
   }
 
   private async initiateP2PConnection() {
-    if (this.isDestroyed) return
+    if (this.isDestroyed || this.pc) return
 
-    console.log("⚡ Initiating ultra-stable P2P connection")
+    console.log("⚡ Initiating rock-solid P2P connection")
     this.onConnectionStatusChange?.("connecting")
     this.connectionState = "connecting"
 
     try {
-      if (this.pc) {
-        this.pc.close()
-      }
-
-      // Ultra-optimized RTCPeerConnection configuration
       this.pc = new RTCPeerConnection(this.getOptimizedRTCConfiguration())
       this.setupPeerConnectionHandlers()
 
-      // Create data channel with maximum performance settings
-      this.dataChannel = this.pc.createDataChannel("ultra-stable-transfer", {
+      this.dataChannel = this.pc.createDataChannel("rock-solid-transfer", {
         ordered: true,
         maxRetransmits: undefined,
-        protocol: "ultra-stable-v5",
+        protocol: "rock-solid-v6",
         negotiated: false,
       })
       this.setupDataChannelHandlers()
 
-      // Ultra-fast connection timeout
       this.connectionTimeout = setTimeout(() => {
         if (this.pc?.connectionState !== "connected") {
-          console.log("⏰ P2P timeout, instant retry...")
+          console.log("⏰ P2P timeout, retrying...")
           this.retryP2PConnection()
         }
       }, this.config.connectionTimeout!)
 
-      // Create optimized offer
       const offer = await this.pc.createOffer({
         offerToReceiveAudio: false,
         offerToReceiveVideo: false,
@@ -1242,41 +945,29 @@ export class UltraReliableP2P {
         offer: this.pc.localDescription,
         timestamp: Date.now(),
         capabilities: {
-          ultraStable: true,
+          rockSolid: true,
           fastTransfer: true,
           resumableTransfers: true,
-          zeroDisconnection: true,
           maxSpeed: true,
         },
       })
     } catch (error) {
       console.error("❌ Error initiating P2P connection:", error)
       this.onError?.("Failed to initiate P2P connection")
-      setTimeout(() => this.retryP2PConnection(), 250)
+      setTimeout(() => this.retryP2PConnection(), 2000)
     }
   }
 
   private getOptimizedRTCConfiguration(): RTCConfiguration {
     return {
       iceServers: [
-        // Ultra-optimized STUN server list
         { urls: "stun:stun.l.google.com:19302" },
         { urls: "stun:stun1.l.google.com:19302" },
         { urls: "stun:stun2.l.google.com:19302" },
         { urls: "stun:stun3.l.google.com:19302" },
         { urls: "stun:stun4.l.google.com:19302" },
         { urls: "stun:stun.cloudflare.com:3478" },
-        { urls: "stun:stun.nextcloud.com:443" },
-        { urls: "stun:stun.sipgate.net:3478" },
-        { urls: "stun:stun.ekiga.net" },
-        { urls: "stun:stun.ideasip.com" },
-        { urls: "stun:stun.stunprotocol.org:3478" },
-        { urls: "stun:stun.voiparound.com" },
-        { urls: "stun:stun.voipbuster.com" },
-        { urls: "stun:stun.voipstunt.com" },
-        { urls: "stun:stun.voxgratia.org" },
 
-        // TURN servers if available
         ...(process.env.NEXT_PUBLIC_TURN_SERVER
           ? [
               {
@@ -1287,7 +978,7 @@ export class UltraReliableP2P {
             ]
           : []),
       ],
-      iceCandidatePoolSize: 30, // Maximum for best connectivity
+      iceCandidatePoolSize: 20,
       bundlePolicy: "max-bundle",
       rtcpMuxPolicy: "require",
       iceTransportPolicy: "all",
@@ -1324,7 +1015,7 @@ export class UltraReliableP2P {
           this.connectionAttempts = 0
           this.disconnectCount = 0
           this.onConnectionRecovery?.()
-          console.log("✅ Ultra-stable P2P connection established!")
+          console.log("✅ Rock-solid P2P connection established!")
           break
 
         case "connecting":
@@ -1333,18 +1024,18 @@ export class UltraReliableP2P {
           break
 
         case "disconnected":
-          console.log("⚠️ P2P disconnected, instant stabilization...")
+          console.log("⚠️ P2P disconnected, will retry...")
           this.connectionState = "disconnected"
           this.lastDisconnectTime = Date.now()
           this.onConnectionStatusChange?.("connecting")
-          setTimeout(() => this.triggerInstantStabilization(), 50) // 50ms instant recovery
+          setTimeout(() => this.retryP2PConnection(), 3000) // 3 second delay
           break
 
         case "failed":
-          console.log("❌ P2P failed, instant retry...")
+          console.log("❌ P2P failed, retrying...")
           this.connectionState = "disconnected"
           this.onConnectionStatusChange?.("disconnected")
-          setTimeout(() => this.retryP2PConnection(), 100) // 100ms retry
+          setTimeout(() => this.retryP2PConnection(), 5000) // 5 second delay
           break
 
         case "closed":
@@ -1367,21 +1058,21 @@ export class UltraReliableP2P {
           break
 
         case "disconnected":
-          console.log("⚠️ ICE disconnected, instant recovery...")
+          console.log("⚠️ ICE disconnected, will restart...")
           setTimeout(() => {
             if (this.pc?.iceConnectionState === "disconnected") {
               this.pc.restartIce()
             }
-          }, 250)
+          }, 2000)
           break
 
         case "failed":
-          console.log("❌ ICE failed, instant restart...")
+          console.log("❌ ICE failed, will restart...")
           setTimeout(() => {
             if (this.pc?.iceConnectionState === "failed") {
               this.pc.restartIce()
             }
-          }, 25) // 25ms instant restart
+          }, 1000)
           break
       }
     }
@@ -1400,22 +1091,21 @@ export class UltraReliableP2P {
     this.dataChannel.bufferedAmountLowThreshold = this.getOptimalBufferThreshold()
 
     this.dataChannel.onopen = () => {
-      console.log("📡 Ultra-stable data channel opened")
+      console.log("📡 Rock-solid data channel opened")
       this.onConnectionStatusChange?.("connected")
       this.connectionState = "connected"
       this.lastSuccessfulConnection = Date.now()
       this.clearConnectionTimeout()
 
-      // Send connection test with ultra-fast confirmation
       this.sendDataChannelMessage({
         type: "connection-test",
         timestamp: Date.now(),
-        message: "Ultra-stable data channel ready",
+        message: "Rock-solid data channel ready",
         capabilities: {
           chunkSize: this.optimalChunkSize,
           concurrentTransfers: this.maxConcurrentTransfers,
           resumableTransfers: this.config.enableResumableTransfers,
-          ultraStable: true,
+          rockSolid: true,
         },
       })
     }
@@ -1428,14 +1118,12 @@ export class UltraReliableP2P {
       console.log("📡 Data channel closed")
       this.connectionState = "disconnected"
       this.onConnectionStatusChange?.("disconnected")
-
-      // Instant recovery attempt
-      setTimeout(() => this.attemptDataChannelRecovery(), 100)
+      setTimeout(() => this.attemptDataChannelRecovery(), 3000)
     }
 
     this.dataChannel.onerror = (error) => {
       console.error("❌ Data channel error:", error)
-      setTimeout(() => this.attemptDataChannelRecovery(), 250)
+      setTimeout(() => this.attemptDataChannelRecovery(), 5000)
     }
 
     this.dataChannel.onbufferedamountlow = () => {
@@ -1446,7 +1134,7 @@ export class UltraReliableP2P {
   private getOptimalBufferThreshold(): number {
     switch (this.connectionStats.quality) {
       case "excellent":
-        return 4 * 1024 * 1024 // 4MB for maximum speed
+        return 4 * 1024 * 1024 // 4MB
       case "good":
         return 2 * 1024 * 1024 // 2MB
       case "poor":
@@ -1484,7 +1172,7 @@ export class UltraReliableP2P {
     } catch (error) {
       console.error("❌ Error handling offer:", error)
       this.onError?.("Failed to handle connection offer")
-      setTimeout(() => this.retryP2PConnection(), 250)
+      setTimeout(() => this.retryP2PConnection(), 2000)
     }
   }
 
@@ -1498,12 +1186,12 @@ export class UltraReliableP2P {
         this.processQueuedICECandidates()
       } else {
         console.warn("⚠️ Cannot set remote description - wrong signaling state:", this.pc?.signalingState)
-        setTimeout(() => this.retryP2PConnection(), 100)
+        setTimeout(() => this.retryP2PConnection(), 2000)
       }
     } catch (error) {
       console.error("❌ Error handling answer:", error)
       this.onError?.("Failed to handle connection answer")
-      setTimeout(() => this.retryP2PConnection(), 250)
+      setTimeout(() => this.retryP2PConnection(), 2000)
     }
   }
 
@@ -1554,12 +1242,11 @@ export class UltraReliableP2P {
     if (this.isDestroyed) return
 
     this.connectionAttempts++
-    console.log(`🔄 Ultra-stable P2P retry (attempt ${this.connectionAttempts})`)
+    console.log(`🔄 Rock-solid P2P retry (attempt ${this.connectionAttempts})`)
 
-    if (this.connectionAttempts < 100) {
-      // Increased retry limit
+    if (this.connectionAttempts < 20) {
       this.resetP2PConnection()
-      const delay = Math.min(100 * this.connectionAttempts, 1000) // Max 1 second delay
+      const delay = Math.min(2000 * this.connectionAttempts, 10000) // Max 10 second delay
       setTimeout(() => {
         if (this.isInitiator) {
           this.initiateP2PConnection()
@@ -1567,10 +1254,9 @@ export class UltraReliableP2P {
       }, delay)
     } else {
       this.onError?.("Connection optimization in progress. The system continues trying automatically.")
-      // Reset attempts for continuous retry
       setTimeout(() => {
         this.connectionAttempts = 0
-      }, 5000)
+      }, 30000)
     }
   }
 
@@ -1586,41 +1272,14 @@ export class UltraReliableP2P {
 
     this.dataChannel = null
     this.iceCandidateQueue = []
-    // Preserve send buffer for ongoing transfers
-  }
-
-  private attemptConnectionRecovery() {
-    console.log("🔧 Ultra-stable connection recovery...")
-
-    // Multi-stage instant recovery
-    if (this.pc && this.pc.connectionState === "disconnected") {
-      // Stage 1: Immediate ICE restart
-      setTimeout(() => {
-        if (this.pc?.connectionState === "disconnected") {
-          console.log("🔄 ICE restart...")
-          this.pc.restartIce()
-        }
-      }, 50)
-
-      // Stage 2: Full retry if needed
-      setTimeout(() => {
-        if (this.pc?.connectionState !== "connected") {
-          console.log("🔄 Full P2P retry...")
-          this.retryP2PConnection()
-        }
-      }, 500)
-    } else {
-      // Direct retry
-      this.retryP2PConnection()
-    }
   }
 
   private attemptDataChannelRecovery() {
-    console.log("🔧 Ultra-stable data channel recovery...")
+    console.log("🔧 Rock-solid data channel recovery...")
 
     if (this.pc?.connectionState === "connected" && this.isInitiator) {
       try {
-        this.dataChannel = this.pc.createDataChannel("ultra-stable-transfer-recovery", {
+        this.dataChannel = this.pc.createDataChannel("rock-solid-transfer-recovery", {
           ordered: true,
           maxRetransmits: undefined,
         })
@@ -1628,10 +1287,10 @@ export class UltraReliableP2P {
         console.log("✅ Data channel recreated successfully")
       } catch (error) {
         console.error("❌ Failed to recreate data channel:", error)
-        setTimeout(() => this.retryP2PConnection(), 250)
+        setTimeout(() => this.retryP2PConnection(), 2000)
       }
     } else {
-      setTimeout(() => this.retryP2PConnection(), 250)
+      setTimeout(() => this.retryP2PConnection(), 2000)
     }
   }
 
@@ -1643,7 +1302,7 @@ export class UltraReliableP2P {
       }
 
       this.collectConnectionStats()
-    }, 250) // Every 250ms for real-time monitoring
+    }, 5000) // Every 5 seconds
   }
 
   private collectConnectionStats() {
@@ -1691,7 +1350,7 @@ export class UltraReliableP2P {
       const throughput = bytesDiff / timeDiff
       this.throughputHistory.push(throughput)
 
-      if (this.throughputHistory.length > 50) {
+      if (this.throughputHistory.length > 20) {
         this.throughputHistory.shift()
       }
 
@@ -1706,7 +1365,6 @@ export class UltraReliableP2P {
   }
 
   private updateConnectionStats() {
-    // Calculate jitter from latency history
     if (this.latencyHistory.length > 1) {
       let jitterSum = 0
       for (let i = 1; i < this.latencyHistory.length; i++) {
@@ -1721,12 +1379,9 @@ export class UltraReliableP2P {
   private updateConnectionQuality() {
     const { latency, throughput, jitter } = this.connectionStats
 
-    // Ultra-optimized quality determination for maximum performance
-    if (latency < 15 && throughput > 8000000 && jitter < 2) {
-      // < 15ms, > 8MB/s, < 2ms jitter
+    if (latency < 50 && throughput > 1000000 && jitter < 10) {
       this.connectionStats.quality = "excellent"
-    } else if (latency < 40 && throughput > 3000000 && jitter < 8) {
-      // < 40ms, > 3MB/s, < 8ms jitter
+    } else if (latency < 100 && throughput > 500000 && jitter < 20) {
       this.connectionStats.quality = "good"
     } else {
       this.connectionStats.quality = "poor"
@@ -1740,20 +1395,18 @@ export class UltraReliableP2P {
 
     const { quality, throughput } = this.connectionStats
 
-    // Ultra-aggressive chunk size adaptation for maximum speed
     switch (quality) {
       case "excellent":
-        this.optimalChunkSize = Math.min(4 * 1024 * 1024, Math.max(2 * 1024 * 1024, throughput / 3)) // Up to 4MB
+        this.optimalChunkSize = Math.min(4 * 1024 * 1024, Math.max(2 * 1024 * 1024, throughput / 4))
         break
       case "good":
-        this.optimalChunkSize = Math.min(2 * 1024 * 1024, Math.max(1024 * 1024, throughput / 5)) // Up to 2MB
+        this.optimalChunkSize = Math.min(2 * 1024 * 1024, Math.max(1024 * 1024, throughput / 6))
         break
       case "poor":
-        this.optimalChunkSize = Math.min(1024 * 1024, Math.max(512 * 1024, throughput / 10)) // Up to 1MB
+        this.optimalChunkSize = Math.min(1024 * 1024, Math.max(512 * 1024, throughput / 10))
         break
     }
 
-    // Ensure chunk size is power of 2 for optimal performance
     this.optimalChunkSize = Math.pow(2, Math.floor(Math.log2(this.optimalChunkSize)))
   }
 
@@ -1763,12 +1416,11 @@ export class UltraReliableP2P {
     const bufferedAmount = this.dataChannel.bufferedAmount
     const threshold = this.getOptimalBufferThreshold()
 
-    // Ultra-aggressive buffer management for maximum speed
-    if (bufferedAmount > threshold * 4) {
+    if (bufferedAmount > threshold * 2) {
       console.log("⚠️ Buffer congestion, optimizing...")
-      this.dataChannel.bufferedAmountLowThreshold = threshold * 2
-    } else if (bufferedAmount < threshold * 0.2) {
-      console.log("📡 Buffer optimal, maximizing speed")
+      this.dataChannel.bufferedAmountLowThreshold = threshold
+    } else if (bufferedAmount < threshold * 0.5) {
+      console.log("📡 Buffer optimal")
       this.dataChannel.bufferedAmountLowThreshold = threshold
     }
   }
@@ -1779,20 +1431,6 @@ export class UltraReliableP2P {
         this.dataChannel.send(JSON.stringify(message))
       } catch (error) {
         console.error("❌ Error sending data channel message:", error)
-        // Try backup data channel
-        this.sendBackupDataChannelMessage(message)
-      }
-    } else if (this.dataChannelBackup?.readyState === "open") {
-      this.sendBackupDataChannelMessage(message)
-    }
-  }
-
-  private sendBackupDataChannelMessage(message: any) {
-    if (this.dataChannelBackup?.readyState === "open") {
-      try {
-        this.dataChannelBackup.send(JSON.stringify(message))
-      } catch (error) {
-        console.error("❌ Error sending backup data channel message:", error)
       }
     }
   }
@@ -1817,22 +1455,21 @@ export class UltraReliableP2P {
         this.sendDataChannelMessage({
           type: "connection-ack",
           timestamp: Date.now(),
-          message: "Ultra-stable connection confirmed",
+          message: "Rock-solid connection confirmed",
           capabilities: {
             chunkSize: this.optimalChunkSize,
             concurrentTransfers: this.maxConcurrentTransfers,
-            ultraStable: true,
+            rockSolid: true,
           },
         })
         break
 
       case "connection-ack":
-        console.log("✅ Ultra-stable connection acknowledged")
+        console.log("✅ Rock-solid connection acknowledged")
         this.lastSuccessfulConnection = Date.now()
         break
 
       case "keep-alive":
-        // Respond to keep-alive
         this.sendDataChannelMessage({
           type: "keep-alive-ack",
           timestamp: Date.now(),
@@ -1876,7 +1513,7 @@ export class UltraReliableP2P {
   }
 
   private handleFileStart(message: any) {
-    console.log(`📥 Starting ultra-stable file reception: ${message.fileName}`)
+    console.log(`📥 Starting rock-solid file reception: ${message.fileName}`)
 
     const transfer: FileTransfer = {
       id: message.fileId,
@@ -1921,7 +1558,6 @@ export class UltraReliableP2P {
       const transfer = this.fileTransfers.get(fileId)
 
       if (fileData && transfer) {
-        // Store chunk by index for resumable transfers
         fileData.chunks.set(chunkIndex, chunkData)
         fileData.receivedSize += chunkData.byteLength
         fileData.lastChunkTime = Date.now()
@@ -1929,7 +1565,6 @@ export class UltraReliableP2P {
         const progress = Math.round((fileData.chunks.size / fileData.totalChunks) * 100)
         transfer.progress = progress
 
-        // Calculate ultra-stable transfer speed
         if (transfer.startTime) {
           const elapsed = (Date.now() - transfer.startTime) / 1000
           transfer.speed = fileData.receivedSize / elapsed
@@ -1939,7 +1574,6 @@ export class UltraReliableP2P {
         this.updateFileTransfers()
         this.onSpeedUpdate?.(transfer.speed || 0)
 
-        // Send acknowledgment for reliable delivery
         this.sendDataChannelMessage({
           type: "file-chunk-ack",
           fileId,
@@ -1953,19 +1587,17 @@ export class UltraReliableP2P {
   }
 
   private handleChunkAck(message: any) {
-    // Handle chunk acknowledgment for reliable delivery
     console.log(`✅ Chunk ${message.chunkIndex} acknowledged for file ${message.fileId}`)
   }
 
   private async handleFileEnd(fileId: string) {
-    console.log(`📥 Ultra-stable file reception complete: ${fileId}`)
+    console.log(`📥 Rock-solid file reception complete: ${fileId}`)
 
     const fileData = this.receivedChunks.get(fileId)
     const transfer = this.fileTransfers.get(fileId)
 
     if (fileData && transfer) {
       try {
-        // Reconstruct file from chunks in correct order
         const orderedChunks: ArrayBuffer[] = []
         for (let i = 0; i < fileData.totalChunks; i++) {
           const chunk = fileData.chunks.get(i)
@@ -1978,7 +1610,6 @@ export class UltraReliableP2P {
 
         const blob = new Blob(orderedChunks, { type: fileData.fileType })
 
-        // Verify checksum if provided
         if (fileData.checksum) {
           const isValid = await this.verifyChecksum(blob, fileData.checksum)
           if (!isValid) {
@@ -1990,7 +1621,6 @@ export class UltraReliableP2P {
           }
         }
 
-        // Download file
         this.downloadFile(blob, fileData.fileName)
 
         transfer.status = "completed"
@@ -2025,7 +1655,6 @@ export class UltraReliableP2P {
 
   private handleResumeRequest(message: any) {
     console.log(`🔄 Resume request for file ${message.fileId} from offset ${message.offset}`)
-    // Handle resume logic for interrupted transfers
   }
 
   private async verifyChecksum(blob: Blob, expectedChecksum: string): Promise<boolean> {
@@ -2058,14 +1687,12 @@ export class UltraReliableP2P {
   }
 
   private processSendBuffer() {
-    // Process send buffer for all active transfers with maximum speed
     this.sendBuffer.forEach((chunks, fileId) => {
       if (chunks.length > 0 && this.dataChannel?.readyState === "open") {
         const threshold = this.getOptimalBufferThreshold()
 
-        // Send multiple chunks at once for maximum speed
         let sentCount = 0
-        while (chunks.length > 0 && this.dataChannel.bufferedAmount < threshold && sentCount < 10) {
+        while (chunks.length > 0 && this.dataChannel.bufferedAmount < threshold && sentCount < 5) {
           const chunk = chunks.shift()
           if (chunk) {
             try {
@@ -2085,19 +1712,17 @@ export class UltraReliableP2P {
     })
   }
 
-  // Enhanced public methods for ultra-stable file transfer
+  // Public methods for file transfer
   public async sendFiles(files: File[]) {
     if (!this.dataChannel || this.dataChannel.readyState !== "open") {
       this.onError?.("Data channel not ready for file transfer")
       return
     }
 
-    console.log(`📤 Starting ultra-stable file transfer: ${files.length} files`)
+    console.log(`📤 Starting rock-solid file transfer: ${files.length} files`)
 
-    // Maintain connection during file transfer
     this.maintainConnection()
 
-    // Process files with maximum parallelization
     const transferPromises = files.map((file) => this.sendSingleFile(file))
     await Promise.all(transferPromises)
   }
@@ -2120,11 +1745,9 @@ export class UltraReliableP2P {
       this.fileTransfers.set(fileId, transfer)
       this.updateFileTransfers()
 
-      // Calculate checksum for integrity verification
       const checksum = await this.calculateChecksum(file)
       transfer.checksum = checksum
 
-      // Send file start message
       this.sendDataChannelMessage({
         type: "file-start",
         fileId,
@@ -2135,7 +1758,6 @@ export class UltraReliableP2P {
         chunkSize: this.optimalChunkSize,
       })
 
-      // Send file in ultra-optimized chunks
       await this.sendFileInChunks(file, fileId, transfer)
     } catch (error) {
       console.error("❌ Error sending file:", error)
@@ -2147,7 +1769,6 @@ export class UltraReliableP2P {
     const totalChunks = Math.ceil(file.size / this.optimalChunkSize)
     let isTransferring = true
 
-    // Initialize send buffer for this file
     this.sendBuffer.set(fileId, [])
 
     const sendChunk = async (index: number, start: number) => {
@@ -2164,17 +1785,15 @@ export class UltraReliableP2P {
       try {
         const arrayBuffer = await slice.arrayBuffer()
 
-        // Create enhanced chunk with metadata
         const fileIdBytes = new TextEncoder().encode(fileId)
         const message = new ArrayBuffer(8 + fileIdBytes.length + arrayBuffer.byteLength)
         const view = new DataView(message)
 
         view.setUint32(0, fileIdBytes.length)
-        view.setUint32(4, index) // Chunk index for resumable transfers
+        view.setUint32(4, index)
         new Uint8Array(message, 8, fileIdBytes.length).set(fileIdBytes)
         new Uint8Array(message, 8 + fileIdBytes.length).set(new Uint8Array(arrayBuffer))
 
-        // Ultra-stable buffer management
         const threshold = this.getOptimalBufferThreshold()
         const buffer = this.sendBuffer.get(fileId)!
 
@@ -2189,11 +1808,9 @@ export class UltraReliableP2P {
           }
         }
 
-        // Update progress
         const progress = Math.min(Math.round(((index + 1) / totalChunks) * 100), 100)
         transfer.progress = progress
 
-        // Calculate ultra-stable transfer speed
         if (transfer.startTime) {
           const elapsed = (Date.now() - transfer.startTime) / 1000
           const bytesSent = (index + 1) * this.optimalChunkSize
@@ -2212,7 +1829,6 @@ export class UltraReliableP2P {
       }
     }
 
-    // Ultra-stable parallel chunk sending with maximum concurrency
     const maxConcurrent = Math.min(this.maxConcurrentTransfers, totalChunks)
     const sendPromises: Promise<void>[] = []
 
@@ -2223,19 +1839,15 @@ export class UltraReliableP2P {
           while (currentIndex < totalChunks && isTransferring) {
             const currentOffset = currentIndex * this.optimalChunkSize
             await sendChunk(currentIndex, currentOffset)
-
-            // No delay for maximum speed
             currentIndex += maxConcurrent
           }
         })(),
       )
     }
 
-    // Wait for all chunks to be sent
     await Promise.all(sendPromises)
 
     if (isTransferring) {
-      // Send file end message
       this.sendDataChannelMessage({
         type: "file-end",
         fileId,
@@ -2250,7 +1862,6 @@ export class UltraReliableP2P {
       console.log(`✅ File ${file.name} sent at ${(transfer.speed! / 1024 / 1024).toFixed(2)} MB/s`)
     }
 
-    // Clean up send buffer
     this.sendBuffer.delete(fileId)
   }
 
@@ -2275,10 +1886,8 @@ export class UltraReliableP2P {
       type,
     }
 
-    // Add to local messages
     this.onChatMessage?.(message)
 
-    // Send to peer
     this.sendDataChannelMessage({
       type: "chat-message",
       id: message.id,
