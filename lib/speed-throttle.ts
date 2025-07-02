@@ -9,10 +9,10 @@ export interface ThrottleConfig {
 export class SpeedThrottle {
   private static readonly SPEED_LIMITS: Record<SpeedLimit, number> = {
     'unlimited': 0,
-    '200kb': 200 * 1024,
-    '500kb': 500 * 1024,
-    '1mb': 1024 * 1024,
-    '2mb': 2 * 1024 * 1024
+    '200kb': 200 * 100,
+    '500kb': 500 * 100,
+    '1mb': 100 * 100,
+    '2mb': 2 * 100 * 100
   }
 
   private bytesPerSecond: number

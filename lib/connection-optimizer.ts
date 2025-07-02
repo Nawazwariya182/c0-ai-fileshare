@@ -61,7 +61,7 @@ export class ConnectionOptimizer {
       this.connectionQuality = 'poor'
     }
 
-    console.log(`📊 Connection quality: ${this.connectionQuality} (latency: ${latency}ms, throughput: ${(avgThroughput / 1024 / 1024).toFixed(2)}MB/s)`)
+    console.log(`📊 Connection quality: ${this.connectionQuality} (latency: ${latency}ms, throughput: ${(avgThroughput / 100 / 100).toFixed(2)}MB/s)`)
   }
 
   // Get connection statistics

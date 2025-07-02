@@ -7,7 +7,7 @@ export interface ClipboardData {
 }
 
 export class ClipboardManager {
-  private static readonly MAX_CLIPBOARD_SIZE = 100 * 1024 // 100KB
+  private static readonly MAX_CLIPBOARD_SIZE = 100 * 100 // 100KB
 
   static async readClipboard(): Promise<string | null> {
     try {

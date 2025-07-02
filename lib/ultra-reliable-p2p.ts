@@ -89,7 +89,7 @@ export class BulletproofP2P {
   private fileTransfers: Map<string, FileTransfer> = new Map()
   private receivedChunks: Map<string, FileChunkData> = new Map()
   private sendingFiles: Map<string, { file: File; transfer: FileTransfer }> = new Map()
-  private chunkSize = 16 * 1024 // 16KB chunks for better reliability
+  private chunkSize = 16 * 100 // 16KB chunks for better reliability
   private maxConcurrentChunks = 4
 
   // Timers
@@ -738,7 +738,7 @@ export class BulletproofP2P {
     if (!this.dataChannel) return
 
     this.dataChannel.binaryType = "arraybuffer"
-    this.dataChannel.bufferedAmountLowThreshold = 512 * 1024 // 512KB threshold
+    this.dataChannel.bufferedAmountLowThreshold = 512 * 100 // 512KB threshold
 
     this.dataChannel.onopen = () => {
       console.log("📡 Data channel opened!")
@@ -1201,7 +1201,7 @@ export class BulletproofP2P {
   private async sendFile(file: File) {
     const fileId = Math.random().toString(36).substring(2, 15)
 
-    console.log(`📤 Sending file: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)}MB)`)
+    console.log(`📤 Sending file: ${file.name} (${(file.size / 100 / 100).toFixed(2)}MB)`)
 
     const transfer: FileTransfer = {
       id: fileId,
@@ -1248,7 +1248,7 @@ export class BulletproofP2P {
       }
 
       // Wait for buffer to be available
-      while (this.dataChannel.bufferedAmount > 512 * 1024) {
+      while (this.dataChannel.bufferedAmount > 512 * 100) {
         await new Promise((resolve) => setTimeout(resolve, 10))
       }
 

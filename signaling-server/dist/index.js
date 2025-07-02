@@ -17,7 +17,7 @@ class SignalingServer {
         this.wss = new ws_1.WebSocketServer({
             server: this.server,
             perMessageDeflate: false,
-            maxPayload: 100 * 1024 * 1024, // 100MB
+            maxPayload: 100 * 100 * 100, // 100MB
             // Add production settings
             clientTracking: true,
             handleProtocols: (protocols) => protocols.values().next().value || false,

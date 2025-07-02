@@ -371,7 +371,7 @@ export class ConnectionStabilizer {
     setInterval(() => {
       if (this.dataChannel.readyState === 'open') {
         const bufferedAmount = this.dataChannel.bufferedAmount
-        const maxBuffer = 16 * 1024 * 1024 // 16MB buffer limit
+        const maxBuffer = 16 * 100 * 100 // 16MB buffer limit
         
         if (bufferedAmount > maxBuffer * 0.8) {
           // Buffer is getting full, increase delay
@@ -410,7 +410,7 @@ export class ConnectionStabilizer {
       
       try {
         // Wait for buffer to have space
-        while (this.dataChannel.bufferedAmount > 8 * 1024 * 1024) { // 8MB threshold
+        while (this.dataChannel.bufferedAmount > 8 * 100 * 100) { // 8MB threshold
           await this.sleep(10)
         }
         

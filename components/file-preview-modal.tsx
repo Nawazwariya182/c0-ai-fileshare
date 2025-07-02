@@ -276,7 +276,7 @@ export function FilePreviewModal({
                       <h3 className="font-black text-sm mb-1 truncate">{currentFile.file.name}</h3>
                       <div className="flex flex-wrap gap-1 text-xs">
                         <span className="bg-white px-1 py-0.5 border border-black rounded">
-                          {(currentFile.file.size / 1024 / 1024).toFixed(1)}MB
+                          {(currentFile.file.size / 100 / 100).toFixed(1)}MB
                         </span>
                         <span className="bg-white px-1 py-0.5 border border-black rounded">
                           {currentFile.file.type?.split("/")[1] || "Unknown"}
@@ -398,7 +398,7 @@ export function FilePreviewModal({
                         <div className="bg-gray-100 p-3 border-2 border-gray-300 rounded">
                           <p className="font-bold text-gray-700 text-sm">File Details:</p>
                           <p className="text-xs text-gray-600 mt-1">
-                            Size: {(currentFile.file.size / 1024 / 1024).toFixed(2)} MB
+                            Size: {(currentFile.file.size / 100 / 100).toFixed(2)} MB
                           </p>
                           <p className="text-xs text-gray-600">Type: {currentFile.file.type || "Unknown"}</p>
                         </div>
@@ -458,7 +458,7 @@ export function FilePreviewModal({
                           />
                           <div className="flex-1 min-w-0">
                             <p className="font-bold text-xs truncate">{item.file.name}</p>
-                            <p className="text-xs text-gray-600">{(item.file.size / 1024 / 1024).toFixed(1)}MB</p>
+                            <p className="text-xs text-gray-600">{(item.file.size / 100 / 100).toFixed(1)}MB</p>
                           </div>
                           <Button
                             onClick={(e) => {
@@ -539,7 +539,7 @@ export function FilePreviewModal({
                         </div>
                         <div className="flex flex-wrap gap-2">
                           <span className="bg-blue-100 text-blue-800 px-3 py-1 border border-blue-300 rounded-full text-sm font-bold">
-                            📁 {(currentFile.file.size / 1024 / 1024).toFixed(2)} MB
+                            📁 {(currentFile.file.size / 100 / 100).toFixed(2)} MB
                           </span>
                           <span className="bg-purple-100 text-purple-800 px-3 py-1 border border-purple-300 rounded-full text-sm font-bold">
                             🏷️ {currentFile.file.type?.split("/")[1]?.toUpperCase() || "UNKNOWN"}
@@ -662,7 +662,7 @@ export function FilePreviewModal({
                             <div className="mt-4 bg-gray-100 p-4 border-2 border-gray-300 rounded-lg max-w-md mx-auto">
                               <p className="font-bold text-gray-700">File Details:</p>
                               <p className="text-sm text-gray-600 mt-1">
-                                Size: {(currentFile.file.size / 1024 / 1024).toFixed(2)} MB
+                                Size: {(currentFile.file.size / 100 / 100).toFixed(2)} MB
                               </p>
                               <p className="text-sm text-gray-600">Type: {currentFile.file.type || "Unknown"}</p>
                             </div>
@@ -715,11 +715,11 @@ export function FilePreviewModal({
                         <div>Selected</div>
                       </div>
                       <div className="bg-white p-2 border border-black rounded text-center">
-                        <div className="font-black">{(totalSize / 1024 / 1024).toFixed(1)}MB</div>
+                        <div className="font-black">{(totalSize / 100 / 100).toFixed(1)}MB</div>
                         <div>Total Size</div>
                       </div>
                       <div className="bg-white p-2 border border-black rounded text-center">
-                        <div className="font-black">{(selectedSize / 1024 / 1024).toFixed(1)}MB</div>
+                        <div className="font-black">{(selectedSize / 100 / 100).toFixed(1)}MB</div>
                         <div>Selected</div>
                       </div>
                     </div>
@@ -756,7 +756,7 @@ export function FilePreviewModal({
                                 {item.file.name}
                               </p>
                               <div className="flex items-center gap-2 text-xs text-gray-600 mt-1">
-                                <span>{(item.file.size / 1024 / 1024).toFixed(1)}MB</span>
+                                <span>{(item.file.size / 100 / 100).toFixed(1)}MB</span>
                                 {item.loading && <span className="text-blue-600">Loading...</span>}
                                 {!item.loading && item.preview?.canPreview && (
                                   <span className="text-green-600 font-bold">✓</span>

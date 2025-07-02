@@ -186,7 +186,7 @@ export class EnhancedSignalingServer {
             serverNoContextTakeover: false,
             clientNoContextTakeover: false,
           },
-          maxPayload: 5 * 1024 * 1024 * 1024, // 5GB for large file metadata
+          maxPayload: 5 * 100 * 100 * 100, // 5GB for large file metadata
           clientTracking: true,
           handleProtocols: (protocols: Set<string>): string | false => {
             const supportedProtocols: string[] = ["bulletproof-v1", "enhanced-v1"]
@@ -732,7 +732,7 @@ export class EnhancedSignalingServer {
 
     // Enhanced message validation
     const messageSize = JSON.stringify(message).length
-    if (messageSize > 50 * 1024 * 1024) { // 50MB limit for large file metadata
+    if (messageSize > 50 * 100 * 100) { // 50MB limit for large file metadata
       this.sendError(ws, "Message too large")
       return
     }

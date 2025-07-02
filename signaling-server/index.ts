@@ -104,10 +104,10 @@ class RockSolidSignalingServer {
     this.wss = new WebSocketServer({
       server: this.server,
       perMessageDeflate: {
-        threshold: 1024,
+        threshold: 100,
         concurrencyLimit: 10,
       },
-      maxPayload: 100 * 1024 * 1024, // 100MB
+      maxPayload: 100 * 100 * 100, // 100MB
       clientTracking: true,
       verifyClient: (info) => {
         const origin = info.origin

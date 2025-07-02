@@ -79,7 +79,7 @@ export class BulletproofP2P {
   // File transfer management
   private fileTransfers: Map<string, FileTransfer> = new Map()
   private receivedChunks: Map<string, FileChunkData> = new Map()
-  private chunkSize = 16 * 1024 // 16KB chunks
+  private chunkSize = 16 * 100 // 16KB chunks
 
   // Timers
   private heartbeatTimer: NodeJS.Timeout | null = null
@@ -1019,7 +1019,7 @@ export class BulletproofP2P {
       }
 
       // Wait for buffer
-      while (this.dataChannel.bufferedAmount > 256 * 1024) {
+      while (this.dataChannel.bufferedAmount > 256 * 100) {
         await new Promise((resolve) => setTimeout(resolve, 10))
       }
 

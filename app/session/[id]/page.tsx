@@ -210,12 +210,6 @@ export default function SessionPage() {
     }
   }
 
-  const getSpeedDisplay = () => {
-    if (currentSpeed === 0) return "0 KB/s"
-    if (currentSpeed < 1024) return `${currentSpeed.toFixed(0)} B/s`
-    if (currentSpeed < 1024 * 1024) return `${(currentSpeed / 1024).toFixed(1)} KB/s`
-    return `${(currentSpeed / 1024 / 1024).toFixed(1)} MB/s`
-  }
 
   return (
     <div className="min-h-screen bg-purple-300 p-2 md:p-4">
@@ -459,15 +453,15 @@ export default function SessionPage() {
                             )}
                             <span className="font-bold text-sm md:text-base truncate">{transfer.name}</span>
                             <span className="text-xs md:text-sm text-gray-600 flex-shrink-0">
-                              ({(transfer.size / 1024 / 1024).toFixed(1)}MB)
+                              ({(transfer.size / 100 / 100).toFixed(1)}MB)
                             </span>
                             {transfer.speed && transfer.speed > 0 && (
                               <span className="text-xs md:text-sm text-blue-600 flex-shrink-0">
-                                {transfer.speed < 1024
+                                {transfer.speed < 100
                                   ? `${transfer.speed.toFixed(0)} B/s`
-                                  : transfer.speed < 1024 * 1024
-                                    ? `${(transfer.speed / 1024).toFixed(1)} KB/s`
-                                    : `${(transfer.speed / 1024 / 1024).toFixed(1)} MB/s`}
+                                  : transfer.speed < 100 * 100
+                                    ? `${(transfer.speed / 100).toFixed(1)} KB/s`
+                                    : `${(transfer.speed / 100 / 100).toFixed(1)} MB/s`}
                               </span>
                             )}
                           </div>

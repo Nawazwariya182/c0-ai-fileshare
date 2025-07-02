@@ -1240,7 +1240,7 @@ export class BulletproofP2PCore {
     }
 
     console.log(`📤 Starting file transfer: ${files.length} files`)
-    console.log(`📊 Total size: ${(files.reduce((sum, f) => sum + f.size, 0) / 1024 / 1024).toFixed(1)}MB`)
+    console.log(`📊 Total size: ${(files.reduce((sum, f) => sum + f.size, 0) / 100 / 100).toFixed(1)}MB`)
 
     // Sort files by size for optimal transfer order
     const sortedFiles = files.sort((a, b) => a.size - b.size)
@@ -1746,8 +1746,8 @@ export class BulletproofP2PCore {
     console.log('📊 Performance Metrics:', {
       connectionHealth: this.connectionState.connectionHealth,
       averageLatency: this.performanceMetrics.averageLatency,
-      averageSpeed: Math.round(this.performanceMetrics.averageTransferSpeed / 1024) + ' KB/s',
-      totalTransferred: Math.round(this.performanceMetrics.totalBytesTransferred / 1024 / 1024) + ' MB',
+      averageSpeed: Math.round(this.performanceMetrics.averageTransferSpeed / 100) + ' KB/s',
+      totalTransferred: Math.round(this.performanceMetrics.totalBytesTransferred / 100 / 100) + ' MB',
       successRate: Math.round((this.performanceMetrics.successfulConnections / 
         (this.performanceMetrics.successfulConnections + this.performanceMetrics.failedConnections)) * 100) + '%',
     })

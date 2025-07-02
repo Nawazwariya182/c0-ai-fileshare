@@ -7,8 +7,8 @@ export interface PreviewResult {
 }
 
 export class FilePreviewGenerator {
-  private static readonly MAX_TEXT_SIZE = 1024 * 1024 // 1MB
-  private static readonly MAX_IMAGE_SIZE = 10 * 1024 * 1024 // 10MB
+  private static readonly MAX_TEXT_SIZE = 100 * 100 // 1MB
+  private static readonly MAX_IMAGE_SIZE = 10 * 100 * 100 // 10MB
 
   static async generatePreview(file: File): Promise<PreviewResult> {
     try {

@@ -107,7 +107,7 @@ export class BulletproofP2PSystem {
     }
 
     console.log(`📤 Starting bulletproof file transfer: ${files.length} files`)
-    console.log(`📊 Total size: ${(files.reduce((sum, f) => sum + f.size, 0) / 1024 / 1024).toFixed(1)}MB`)
+    console.log(`📊 Total size: ${(files.reduce((sum, f) => sum + f.size, 0) / 100 / 100).toFixed(1)}MB`)
 
     try {
       await this.connectionEngine.sendFiles(files)
