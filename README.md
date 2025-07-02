@@ -168,7 +168,7 @@ You should see: "✅ Signaling server is running on ws://localhost:8080"
 **Problem**: File transfer progress stops
 
 **Solutions**:
-1. **Check file size** (max 100MB)
+1. **Check file size** (max 1GB)
 2. **Verify file type** is allowed
 3. **Stable connection** required for large files
 4. **Browser memory**: Refresh page for very large files
@@ -231,14 +231,14 @@ Update environment variables for production WebSocket URL.
 ### Sharing Files
 
 1. Once connected, drag & drop files or click "CHOOSE FILES"
-2. Files are validated for security (max 100MB, no executables)
+2. Files are validated for security (max 1GB, no executables)
 3. Watch real-time progress as files transfer directly
 4. Received files download automatically
 
 ## 🔒 Security Features
 
 - **File Type Validation**: Blocks executable files (.exe, .bat, .sh, etc.)
-- **Size Limits**: Maximum 100MB per file
+- **Size Limits**: Maximum 1GB per file
 - **Session Expiration**: Sessions auto-expire after 10 minutes of inactivity
 - **Input Sanitization**: All user inputs are validated and sanitized
 - **Secure WebSocket**: Uses WSS in production

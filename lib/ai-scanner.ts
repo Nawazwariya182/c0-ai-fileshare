@@ -176,7 +176,7 @@ Respond with JSON: {"isRisky": boolean, "reason": "explanation", "confidence": 0
     }
 
     // Very large files might be suspicious
-    if (file.size > 500 * 100 * 100) { // 500MB
+    if (file.size > 500 * 1024 * 1024) { // 500MB
       return {
         isRisky: true,
         reason: 'File size exceeds safety limits',

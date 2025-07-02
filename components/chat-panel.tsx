@@ -51,7 +51,7 @@ export function ChatPanel({ isConnected, currentUser, onSendMessage, messages }:
       .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
       .replace(/javascript:/gi, '')
       .replace(/on\w+\s*=/gi, '')
-      .substring(0, 1000) // Limit message length
+      .substring(0, 10240) // Limit message length
 
     onSendMessage(sanitized, 'text')
     setMessageInput('')
@@ -99,7 +99,7 @@ export function ChatPanel({ isConnected, currentUser, onSendMessage, messages }:
         button.textContent = 'COPIED!'
         setTimeout(() => {
           button.textContent = originalText
-        }, 1000)
+        }, 10240)
       }
     }
   }
@@ -129,8 +129,8 @@ export function ChatPanel({ isConnected, currentUser, onSendMessage, messages }:
                   key={message.id}
                   className={`p-2 border-2 border-black ${
                     message.sender === currentUser
-                      ? 'bg-blue-100 ml-4'
-                      : 'bg-gray-100 mr-4'
+                      ? 'bg-blue-1024 ml-4'
+                      : 'bg-gray-1024 mr-4'
                   }`}
                 >
                   <div className="flex items-center justify-between mb-1">
@@ -191,11 +191,11 @@ export function ChatPanel({ isConnected, currentUser, onSendMessage, messages }:
           </div>
           
           {clipboardContent && (
-            <div className="bg-yellow-100 p-2 border-2 border-black text-sm">
+            <div className="bg-yellow-1024 p-2 border-2 border-black text-sm">
               <p className="font-bold mb-1">Clipboard Preview:</p>
               <p className="break-words">
-                {clipboardContent.length > 100 
-                  ? clipboardContent.substring(0, 100) + '...'
+                {clipboardContent.length > 1024 
+                  ? clipboardContent.substring(0, 1024) + '...'
                   : clipboardContent
                 }
               </p>
@@ -213,7 +213,7 @@ export function ChatPanel({ isConnected, currentUser, onSendMessage, messages }:
             placeholder={isConnected ? "Type a message..." : "Connect to chat"}
             disabled={!isConnected}
             className="neubrutalism-input flex-1"
-            maxLength={1000}
+            maxLength={10240}
           />
           <Button
             onClick={handleSendMessage}

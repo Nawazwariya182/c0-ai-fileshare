@@ -53,7 +53,7 @@ export class ConnectionOptimizer {
     const avgThroughput = this.throughputHistory.reduce((a, b) => a + b, 0) / this.throughputHistory.length
 
     // Determine connection quality
-    if (latency < 50 && avgThroughput > 1000000) { // < 50ms latency, > 1MB/s
+    if (latency < 50 && avgThroughput > 10240000) { // < 50ms latency, > 1MB/s
       this.connectionQuality = 'excellent'
     } else if (latency < 200 && avgThroughput > 500000) { // < 200ms latency, > 500KB/s
       this.connectionQuality = 'good'
@@ -61,7 +61,7 @@ export class ConnectionOptimizer {
       this.connectionQuality = 'poor'
     }
 
-    console.log(`📊 Connection quality: ${this.connectionQuality} (latency: ${latency}ms, throughput: ${(avgThroughput / 100 / 100).toFixed(2)}MB/s)`)
+    console.log(`📊 Connection quality: ${this.connectionQuality} (latency: ${latency}ms, throughput: ${(avgThroughput / 1024 / 1024).toFixed(2)}MB/s)`)
   }
 
   // Get connection statistics

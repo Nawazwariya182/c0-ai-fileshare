@@ -186,7 +186,7 @@ export function FilePreviewModal({
       >
         {/* Header - Compact on mobile */}
         <CardHeader
-          className={`flex-shrink-0 border-b-4 border-black bg-gradient-to-r from-blue-100 to-purple-100 ${
+          className={`flex-shrink-0 border-b-4 border-black bg-gradient-to-r from-blue-1024 to-purple-1024 ${
             isMobile ? "p-2" : "p-3 md:p-4"
           }`}
         >
@@ -276,7 +276,7 @@ export function FilePreviewModal({
                       <h3 className="font-black text-sm mb-1 truncate">{currentFile.file.name}</h3>
                       <div className="flex flex-wrap gap-1 text-xs">
                         <span className="bg-white px-1 py-0.5 border border-black rounded">
-                          {(currentFile.file.size / 100 / 100).toFixed(1)}MB
+                          {(currentFile.file.size / 1024 / 1024).toFixed(1)}MB
                         </span>
                         <span className="bg-white px-1 py-0.5 border border-black rounded">
                           {currentFile.file.type?.split("/")[1] || "Unknown"}
@@ -380,7 +380,7 @@ export function FilePreviewModal({
 
                     {currentFile.preview.previewType === "audio" && currentFile.preview.previewData && (
                       <div className="text-center p-4">
-                        <div className="bg-gradient-to-br from-purple-100 to-blue-100 p-6 border-4 border-black rounded-lg">
+                        <div className="bg-gradient-to-br from-purple-1024 to-blue-1024 p-6 border-4 border-black rounded-lg">
                           <div className="text-6xl mb-4">🎵</div>
                           <h3 className="font-bold text-base mb-4 break-words">{currentFile.file.name}</h3>
                           <audio src={currentFile.preview.previewData} controls className="w-full">
@@ -395,10 +395,10 @@ export function FilePreviewModal({
                         <Files className="w-16 h-16 mx-auto mb-4 text-gray-400" />
                         <p className="font-bold text-gray-600 text-base mb-2">Preview not available</p>
                         <p className="text-gray-500 text-sm mb-4">This file type cannot be previewed</p>
-                        <div className="bg-gray-100 p-3 border-2 border-gray-300 rounded">
+                        <div className="bg-gray-1024 p-3 border-2 border-gray-300 rounded">
                           <p className="font-bold text-gray-700 text-sm">File Details:</p>
                           <p className="text-xs text-gray-600 mt-1">
-                            Size: {(currentFile.file.size / 100 / 100).toFixed(2)} MB
+                            Size: {(currentFile.file.size / 1024 / 1024).toFixed(2)} MB
                           </p>
                           <p className="text-xs text-gray-600">Type: {currentFile.file.type || "Unknown"}</p>
                         </div>
@@ -442,7 +442,7 @@ export function FilePreviewModal({
                             index === currentFileIndex
                               ? "bg-blue-200 border-blue-600"
                               : selectedFiles.has(item.id)
-                                ? "bg-green-100"
+                                ? "bg-green-1024"
                                 : "bg-white"
                           }`}
                           onClick={() => setCurrentFileIndex(index)}
@@ -458,7 +458,7 @@ export function FilePreviewModal({
                           />
                           <div className="flex-1 min-w-0">
                             <p className="font-bold text-xs truncate">{item.file.name}</p>
-                            <p className="text-xs text-gray-600">{(item.file.size / 100 / 100).toFixed(1)}MB</p>
+                            <p className="text-xs text-gray-600">{(item.file.size / 1024 / 1024).toFixed(1)}MB</p>
                           </div>
                           <Button
                             onClick={(e) => {
@@ -538,20 +538,20 @@ export function FilePreviewModal({
                           </span>
                         </div>
                         <div className="flex flex-wrap gap-2">
-                          <span className="bg-blue-100 text-blue-800 px-3 py-1 border border-blue-300 rounded-full text-sm font-bold">
-                            📁 {(currentFile.file.size / 100 / 100).toFixed(2)} MB
+                          <span className="bg-blue-1024 text-blue-800 px-3 py-1 border border-blue-300 rounded-full text-sm font-bold">
+                            📁 {(currentFile.file.size / 1024 / 1024).toFixed(2)} MB
                           </span>
-                          <span className="bg-purple-100 text-purple-800 px-3 py-1 border border-purple-300 rounded-full text-sm font-bold">
+                          <span className="bg-purple-1024 text-purple-800 px-3 py-1 border border-purple-300 rounded-full text-sm font-bold">
                             🏷️ {currentFile.file.type?.split("/")[1]?.toUpperCase() || "UNKNOWN"}
                           </span>
-                          <span className="bg-gray-100 text-gray-800 px-3 py-1 border border-gray-300 rounded-full text-sm font-bold">
+                          <span className="bg-gray-1024 text-gray-800 px-3 py-1 border border-gray-300 rounded-full text-sm font-bold">
                             📅 {new Date().toLocaleDateString()}
                           </span>
                         </div>
                       </div>
 
                       <div className="flex items-center gap-3 flex-shrink-0">
-                        <label className="flex items-center gap-2 cursor-pointer bg-green-100 hover:bg-green-200 p-3 border-2 border-green-400 rounded-lg transition-colors">
+                        <label className="flex items-center gap-2 cursor-pointer bg-green-1024 hover:bg-green-200 p-3 border-2 border-green-400 rounded-lg transition-colors">
                           <input
                             type="checkbox"
                             checked={selectedFiles.has(currentFile.id)}
@@ -605,7 +605,7 @@ export function FilePreviewModal({
                               src={currentFile.preview.previewData || "/placeholder.svg"}
                               alt={currentFile.file.name}
                               className="max-w-full h-auto object-contain rounded-lg shadow-lg border-2 border-gray-300 mx-auto"
-                              style={{ maxWidth: "100%" }}
+                              style={{ maxWidth: "1024%" }}
                             />
                           </div>
                         )}
@@ -634,7 +634,7 @@ export function FilePreviewModal({
                               src={currentFile.preview.previewData}
                               controls
                               className="max-w-full h-auto rounded-lg shadow-lg border-2 border-gray-300"
-                              style={{ maxWidth: "100%" }}
+                              style={{ maxWidth: "1024%" }}
                             >
                               Your browser does not support video playback.
                             </video>
@@ -643,7 +643,7 @@ export function FilePreviewModal({
 
                         {currentFile.preview.previewType === "audio" && currentFile.preview.previewData && (
                           <div className="text-center">
-                            <div className="bg-gradient-to-br from-purple-100 to-blue-100 p-12 border-4 border-black rounded-lg shadow-lg max-w-md mx-auto">
+                            <div className="bg-gradient-to-br from-purple-1024 to-blue-1024 p-12 border-4 border-black rounded-lg shadow-lg max-w-md mx-auto">
                               <div className="text-8xl mb-6">🎵</div>
                               <h3 className="font-bold text-xl mb-6 break-words">{currentFile.file.name}</h3>
                               <audio src={currentFile.preview.previewData} controls className="w-full">
@@ -659,10 +659,10 @@ export function FilePreviewModal({
                             <p className="font-bold text-gray-600 text-xl mb-2">Preview not available</p>
                             <p className="text-gray-500 text-lg mb-2">This file type cannot be previewed</p>
                             <p className="text-sm text-gray-400">File will be sent as-is</p>
-                            <div className="mt-4 bg-gray-100 p-4 border-2 border-gray-300 rounded-lg max-w-md mx-auto">
+                            <div className="mt-4 bg-gray-1024 p-4 border-2 border-gray-300 rounded-lg max-w-md mx-auto">
                               <p className="font-bold text-gray-700">File Details:</p>
                               <p className="text-sm text-gray-600 mt-1">
-                                Size: {(currentFile.file.size / 100 / 100).toFixed(2)} MB
+                                Size: {(currentFile.file.size / 1024 / 1024).toFixed(2)} MB
                               </p>
                               <p className="text-sm text-gray-600">Type: {currentFile.file.type || "Unknown"}</p>
                             </div>
@@ -715,11 +715,11 @@ export function FilePreviewModal({
                         <div>Selected</div>
                       </div>
                       <div className="bg-white p-2 border border-black rounded text-center">
-                        <div className="font-black">{(totalSize / 100 / 100).toFixed(1)}MB</div>
+                        <div className="font-black">{(totalSize / 1024 / 1024).toFixed(1)}MB</div>
                         <div>Total Size</div>
                       </div>
                       <div className="bg-white p-2 border border-black rounded text-center">
-                        <div className="font-black">{(selectedSize / 100 / 100).toFixed(1)}MB</div>
+                        <div className="font-black">{(selectedSize / 1024 / 1024).toFixed(1)}MB</div>
                         <div>Selected</div>
                       </div>
                     </div>
@@ -736,8 +736,8 @@ export function FilePreviewModal({
                               index === currentFileIndex
                                 ? "bg-blue-200 border-blue-600 shadow-md"
                                 : selectedFiles.has(item.id)
-                                  ? "bg-green-100 hover:bg-green-200"
-                                  : "bg-white hover:bg-gray-100"
+                                  ? "bg-green-1024 hover:bg-green-200"
+                                  : "bg-white hover:bg-gray-1024"
                             }`}
                             onClick={() => setCurrentFileIndex(index)}
                           >
@@ -756,7 +756,7 @@ export function FilePreviewModal({
                                 {item.file.name}
                               </p>
                               <div className="flex items-center gap-2 text-xs text-gray-600 mt-1">
-                                <span>{(item.file.size / 100 / 100).toFixed(1)}MB</span>
+                                <span>{(item.file.size / 1024 / 1024).toFixed(1)}MB</span>
                                 {item.loading && <span className="text-blue-600">Loading...</span>}
                                 {!item.loading && item.preview?.canPreview && (
                                   <span className="text-green-600 font-bold">✓</span>
@@ -772,7 +772,7 @@ export function FilePreviewModal({
                               }}
                               variant="ghost"
                               size="sm"
-                              className="text-red-600 hover:bg-red-100 p-1 flex-shrink-0"
+                              className="text-red-600 hover:bg-red-1024 p-1 flex-shrink-0"
                             >
                               <Trash2 className="w-3 h-3" />
                             </Button>
@@ -789,7 +789,7 @@ export function FilePreviewModal({
 
         {/* Footer Actions - Sticky */}
         <div
-          className={`flex-shrink-0 border-t-4 border-black bg-gradient-to-r from-gray-100 to-gray-200 ${
+          className={`flex-shrink-0 border-t-4 border-black bg-gradient-to-r from-gray-1024 to-gray-200 ${
             isMobile ? "p-2" : "p-3 md:p-4"
           }`}
         >

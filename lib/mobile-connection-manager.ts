@@ -309,7 +309,7 @@ export class MobileConnectionManager {
     }
 
     // Keep-alive every 10 seconds
-    setInterval(keepAlive, 10000)
+    setInterval(keepAlive, 102400)
 
     // Prevent iOS Safari from pausing
     if (/iPad|iPhone|iPod/.test(navigator.userAgent)) {

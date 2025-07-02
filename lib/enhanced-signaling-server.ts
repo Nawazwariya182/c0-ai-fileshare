@@ -186,7 +186,7 @@ export class EnhancedSignalingServer {
             serverNoContextTakeover: false,
             clientNoContextTakeover: false,
           },
-          maxPayload: 5 * 100 * 100 * 100, // 5GB for large file metadata
+          maxPayload: 5 * 1024 * 1024 * 1024, // 5GB for large file metadata
           clientTracking: true,
           handleProtocols: (protocols: Set<string>): string | false => {
             const supportedProtocols: string[] = ["bulletproof-v1", "enhanced-v1"]
@@ -243,7 +243,7 @@ export class EnhancedSignalingServer {
     console.log(`   User-Agent: ${userAgent?.substring(0, 50)}...`)
 
     this.metrics.totalConnections++
-    this.connectionHealth.set(ws, 100)
+    this.connectionHealth.set(ws, 1024)
     this.latencyTracking.set(ws, [])
 
     // Send enhanced connection confirmation
@@ -312,10 +312,10 @@ export class EnhancedSignalingServer {
         const health = this.connectionHealth.get(ws) || 0
         if (health < 30) {
           console.log(`⏰ Unhealthy connection timeout for ${clientIP}`)
-          ws.close(1008, "Connection unhealthy")
+          ws.close(10248, "Connection unhealthy")
         }
       }
-    }, 45 * 60 * 1000) // 45 minutes for enhanced persistence
+    }, 45 * 60 * 10240) // 45 minutes for enhanced persistence
 
     ws.on("close", () => {
       clearTimeout(connectionTimeout)
@@ -332,7 +332,7 @@ export class EnhancedSignalingServer {
         const isBackground = this.backgroundConnections.has(ws)
         
         // Adaptive ping frequency based on health and background status
-        const frequency = isBackground ? 5000 : (health > 70 ? 20000 : 10000)
+        const frequency = isBackground ? 5000 : (health > 70 ? 20000 : 102400)
         
         ws.ping(Date.now().toString())
         
@@ -374,7 +374,7 @@ export class EnhancedSignalingServer {
 
   private updateConnectionHealth(ws: WebSocket, delta: number): void {
     const currentHealth = this.connectionHealth.get(ws) || 0
-    const newHealth = Math.max(0, Math.min(100, currentHealth + delta))
+    const newHealth = Math.max(0, Math.min(1024, currentHealth + delta))
     this.connectionHealth.set(ws, newHealth)
     
     // Track background connections
@@ -396,7 +396,7 @@ export class EnhancedSignalingServer {
       return
     }
 
-    if (userId && (typeof userId !== "string" || userId.length < 1 || userId.length > 100)) {
+    if (userId && (typeof userId !== "string" || userId.length < 1 || userId.length > 1024)) {
       this.sendError(ws, "Invalid user ID format")
       return
     }
@@ -472,7 +472,7 @@ export class EnhancedSignalingServer {
       // Update connection with enhanced data
       existingUser.ws = ws
       existingUser.lastSeen = new Date()
-      existingUser.connectionHealth = this.connectionHealth.get(ws) || 100
+      existingUser.connectionHealth = this.connectionHealth.get(ws) || 1024
       existingUser.capabilities = { ...existingUser.capabilities, ...capabilities }
       
       this.userSessions.set(ws, sessionId)
@@ -520,7 +520,7 @@ export class EnhancedSignalingServer {
       lastSeen: new Date(),
       isInitiator,
       capabilities: capabilities || {},
-      connectionHealth: this.connectionHealth.get(ws) || 100,
+      connectionHealth: this.connectionHealth.get(ws) || 1024,
       backgroundMode: false,
       networkType: capabilities?.networkType || "unknown",
     }
@@ -699,8 +699,8 @@ export class EnhancedSignalingServer {
     const sessionAge = Date.now() - session.createdAt.getTime()
     const lastActivity = Date.now() - session.lastActivity.getTime()
     
-    const agePenalty = Math.min(sessionAge / (60 * 60 * 1000), 0.2) // Max 20% penalty for age
-    const activityPenalty = Math.min(lastActivity / (5 * 60 * 1000), 0.3) // Max 30% penalty for inactivity
+    const agePenalty = Math.min(sessionAge / (60 * 60 * 10240), 0.2) // Max 20% penalty for age
+    const activityPenalty = Math.min(lastActivity / (5 * 60 * 10240), 0.3) // Max 30% penalty for inactivity
 
     return Math.max(0, averageHealth * (1 - agePenalty - activityPenalty))
   }
@@ -732,7 +732,7 @@ export class EnhancedSignalingServer {
 
     // Enhanced message validation
     const messageSize = JSON.stringify(message).length
-    if (messageSize > 50 * 100 * 100) { // 50MB limit for large file metadata
+    if (messageSize > 50 * 1024 * 1024) { // 50MB limit for large file metadata
       this.sendError(ws, "Message too large")
       return
     }
@@ -814,7 +814,7 @@ export class EnhancedSignalingServer {
     // Sort by priority and limit queue size
     queue.sort((a, b) => (b.priority || 0) - (a.priority || 0))
     if (queue.length > 200) { // Increased queue size for file transfers
-      queue.splice(100) // Keep only highest priority messages
+      queue.splice(1024) // Keep only highest priority messages
     }
 
     console.log(`📬 Enhanced queued message for user ${userId.substring(0, 8)}... (queue size: ${queue.length}, priority: ${message.priority || 0})`)
@@ -822,7 +822,7 @@ export class EnhancedSignalingServer {
 
   private getMessagePriority(messageType: string): number {
     const priorities: { [key: string]: number } = {
-      "connection-recovery": 100,
+      "connection-recovery": 1024,
       "user-joined": 90,
       "user-left": 90,
       "offer": 80,
@@ -1029,14 +1029,14 @@ export class EnhancedSignalingServer {
     this.sessions.forEach((session, sessionId) => {
       // Remove sessions inactive for more than 4 hours (extended for file transfers)
       const inactiveTime = now.getTime() - session.lastActivity.getTime()
-      if (inactiveTime > 4 * 60 * 60 * 1000) { // 4 hours
+      if (inactiveTime > 4 * 60 * 60 * 10240) { // 4 hours
         expiredSessions.push(sessionId)
       } else {
         // Clean up inactive users within active sessions
         const inactiveUsers: string[] = []
         session.users.forEach((userData, userId) => {
           const userInactiveTime = now.getTime() - userData.lastSeen.getTime()
-          if (userInactiveTime > 2 * 60 * 60 * 1000) { // 2 hours
+          if (userInactiveTime > 2 * 60 * 60 * 10240) { // 2 hours
             inactiveUsers.push(userId)
           }
         })
@@ -1058,7 +1058,7 @@ export class EnhancedSignalingServer {
       if (session) {
         session.users.forEach((userData) => {
           this.sendError(userData.ws, "Session expired due to inactivity")
-          userData.ws.close(1000, "Session expired")
+          userData.ws.close(10240, "Session expired")
         })
 
         this.sessions.delete(sessionId)
@@ -1111,7 +1111,7 @@ export class EnhancedSignalingServer {
         // Remove messages older than 2 hours
         session.messageQueue.set(
           userId,
-          queue.filter((msg) => now - msg.queuedAt < 2 * 60 * 60 * 1000)
+          queue.filter((msg) => now - msg.queuedAt < 2 * 60 * 60 * 10240)
         )
 
         const cleaned = originalLength - queue.length
@@ -1215,7 +1215,7 @@ export class EnhancedSignalingServer {
             "wss://p2p-signaling.herokuapp.com",
           ],
         })
-        ws.close(1000, "Server shutdown")
+        ws.close(10240, "Server shutdown")
       }
     })
 

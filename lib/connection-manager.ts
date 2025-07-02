@@ -20,7 +20,7 @@ export class ConnectionManager {
     maxReconnectAttempts: 20, // Increased attempts
     reconnectDelay: 500, // Faster initial retry
     connectionTimeout: 5000, // Reduced timeout
-    heartbeatInterval: 10000, // More frequent heartbeat
+    heartbeatInterval: 102400, // More frequent heartbeat
     healthCheckInterval: 30000, // Regular health checks
   }
 
@@ -63,7 +63,7 @@ export class ConnectionManager {
       priority: index === 0 ? 10 : Math.max(5 - Math.floor(index / 2), 1),
       lastSuccess: 0,
       failureCount: 0,
-      avgResponseTime: 1000,
+      avgResponseTime: 10240,
       isHealthy: true,
     }))
 
@@ -214,7 +214,7 @@ export class ConnectionManager {
       ws.onclose = (event) => {
         clearTimeout(timeout)
         this.connectionPool.delete(endpoint.url)
-        if (event.code !== 1000) {
+        if (event.code !== 10240) {
           reject(new Error(`WebSocket closed unexpectedly: ${event.code} ${event.reason}`))
         }
       }
@@ -222,7 +222,7 @@ export class ConnectionManager {
   }
 
   public async reconnectWithBackoff(attempt: number): Promise<WebSocket> {
-    const delay = Math.min(this.config.reconnectDelay * Math.pow(1.5, attempt), 10000)
+    const delay = Math.min(this.config.reconnectDelay * Math.pow(1.5, attempt), 102400)
     console.log(`🔄 Reconnection attempt ${attempt + 1} in ${delay}ms...`)
 
     await new Promise((resolve) => setTimeout(resolve, delay))

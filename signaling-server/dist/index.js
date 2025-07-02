@@ -17,7 +17,7 @@ class SignalingServer {
         this.wss = new ws_1.WebSocketServer({
             server: this.server,
             perMessageDeflate: false,
-            maxPayload: 100 * 100 * 100, // 100MB
+            maxPayload: 1024 * 1024 * 1024, // 1GB
             // Add production settings
             clientTracking: true,
             handleProtocols: (protocols) => protocols.values().next().value || false,
@@ -71,7 +71,7 @@ class SignalingServer {
         console.log("\n🛑 Shutting down signaling server...");
         // Close all WebSocket connections
         this.wss.clients.forEach((ws) => {
-            ws.close(1000, "Server shutting down");
+            ws.close(10240, "Server shutting down");
         });
         // Close the server
         this.server.close(() => {
@@ -230,7 +230,7 @@ class SignalingServer {
                     userCount: session.users.size,
                     readyForConnection: true,
                 }, ws);
-            }, 1000);
+            }, 10240);
         }
         else {
             // Just notify about the join
@@ -387,7 +387,7 @@ class SignalingServer {
         this.sessions.forEach((session, sessionId) => {
             // Remove sessions inactive for more than 10 minutes
             const inactiveTime = now.getTime() - session.lastActivity.getTime();
-            if (inactiveTime > 10 * 60 * 1000) {
+            if (inactiveTime > 10 * 60 * 10240) {
                 expiredSessions.push(sessionId);
             }
             else {
@@ -395,7 +395,7 @@ class SignalingServer {
                 const inactiveUsers = [];
                 session.users.forEach((userData, userId) => {
                     const userInactiveTime = now.getTime() - userData.lastSeen.getTime();
-                    if (userInactiveTime > 5 * 60 * 1000) {
+                    if (userInactiveTime > 5 * 60 * 10240) {
                         // 5 minutes
                         inactiveUsers.push(userId);
                     }

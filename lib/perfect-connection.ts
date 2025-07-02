@@ -95,7 +95,7 @@ export class PerfectConnection {
     this.cleanup()
     this.connectionAttempts = 0
     this.currentUrlIndex = 0
-    setTimeout(() => this.connect(), 1000)
+    setTimeout(() => this.connect(), 10240)
   }
 
   private cleanup() {
@@ -115,7 +115,7 @@ export class PerfectConnection {
       this.dataChannel = null
     }
     if (this.ws) {
-      this.ws.close(1000, "Clean disconnect")
+      this.ws.close(10240, "Clean disconnect")
       this.ws = null
     }
   }
@@ -126,7 +126,7 @@ export class PerfectConnection {
       this.onError?.(`Failed to connect to signaling server. Tried ${this.wsUrls.length} URLs.`)
       
       // Auto-retry with exponential backoff
-      const delay = Math.min(1000 * Math.pow(2, this.connectionAttempts), 30000)
+      const delay = Math.min(10240 * Math.pow(2, this.connectionAttempts), 30000)
       this.connectionAttempts++
       
       if (this.connectionAttempts < 10) {
@@ -189,9 +189,9 @@ export class PerfectConnection {
         this.onSignalingStatusChange?.("disconnected")
         this.stopHeartbeat()
 
-        if (event.code !== 1000 && event.code !== 1001) {
+        if (event.code !== 10240 && event.code !== 10241) {
           this.currentUrlIndex++
-          setTimeout(() => this.connectWebSocket(), 1000)
+          setTimeout(() => this.connectWebSocket(), 10240)
         }
       }
 
@@ -218,7 +218,7 @@ export class PerfectConnection {
     this.stopHeartbeat()
     this.heartbeatInterval = setInterval(() => {
       this.sendMessage({ type: "ping", sessionId: this.sessionId, userId: this.userId })
-    }, 10000) // Every 10 seconds
+    }, 102400) // Every 10 seconds
   }
 
   private stopHeartbeat() {
@@ -496,7 +496,7 @@ export class PerfectConnection {
     if (fileData && transfer) {
       fileData.chunks.push(chunkData)
       const receivedSize = fileData.chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0)
-      const progress = Math.round((receivedSize / fileData.totalSize) * 100)
+      const progress = Math.round((receivedSize / fileData.totalSize) * 1024)
 
       transfer.progress = progress
       transfer.speed = this.calculateTransferSpeed(chunkData.byteLength)
@@ -510,7 +510,7 @@ export class PerfectConnection {
   private calculateTransferSpeed(chunkSize: number): number {
     const now = Date.now()
     const lastTime = (window as any).lastChunkTime || now
-    const timeDiff = (now - lastTime) / 1000
+    const timeDiff = (now - lastTime) / 10240
     ;(window as any).lastChunkTime = now
     
     return timeDiff > 0 ? chunkSize / timeDiff : 0
@@ -528,7 +528,7 @@ export class PerfectConnection {
         if (isValid) {
           this.downloadFile(blob, fileData.fileName)
           transfer.status = "completed"
-          transfer.progress = 100
+          transfer.progress = 1024
         } else {
           transfer.status = "error"
           this.onError?.("File integrity check failed")
@@ -536,7 +536,7 @@ export class PerfectConnection {
       } else {
         this.downloadFile(blob, fileData.fileName)
         transfer.status = "completed"
-        transfer.progress = 100
+        transfer.progress = 1024
       }
 
       this.fileTransfers.set(fileId, transfer)
@@ -664,7 +664,7 @@ export class PerfectConnection {
         this.dataChannel?.send(message)
         offset += chunkSize
 
-        const progress = Math.min(Math.round((offset / file.size) * 100), 100)
+        const progress = Math.min(Math.round((offset / file.size) * 1024), 1024)
         transfer.progress = progress
         transfer.speed = this.calculateTransferSpeed(chunk.byteLength)
         
@@ -678,7 +678,7 @@ export class PerfectConnection {
           // File complete
           this.dataChannel?.send(JSON.stringify({ type: "file-end", fileId }))
           transfer.status = "completed"
-          transfer.progress = 100
+          transfer.progress = 1024
           this.fileTransfers.set(fileId, transfer)
           this.updateFileTransfers()
         }

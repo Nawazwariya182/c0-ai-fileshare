@@ -89,7 +89,7 @@ export class BulletproofP2P {
   private fileTransfers: Map<string, FileTransfer> = new Map()
   private receivedChunks: Map<string, FileChunkData> = new Map()
   private sendingFiles: Map<string, { file: File; transfer: FileTransfer }> = new Map()
-  private chunkSize = 16 * 100 // 16KB chunks for better reliability
+  private chunkSize = 16 * 1024 // 16KB chunks for better reliability
   private maxConcurrentChunks = 4
 
   // Timers
@@ -353,7 +353,7 @@ export class BulletproofP2P {
         this.ws = null
         this.stopHeartbeat()
 
-        if (!this.isDestroyed && event.code !== 1000) {
+        if (!this.isDestroyed && event.code !== 10240) {
           this.scheduleReconnect()
         }
       }
@@ -419,7 +419,7 @@ export class BulletproofP2P {
           timestamp: Date.now(),
         })
       }
-    }, 10000) // Every 10 seconds
+    }, 102400) // Every 10 seconds
   }
 
   private stopHeartbeat() {
@@ -457,7 +457,7 @@ export class BulletproofP2P {
         // Restart P2P if needed
         if (this.connectionState !== "connected" && this.isInitiator && this.p2pState === "idle") {
           console.log("🚀 Restarting P2P after peer reconnection")
-          setTimeout(() => this.attemptP2PConnection(), 1000)
+          setTimeout(() => this.attemptP2PConnection(), 10240)
         }
         break
 
@@ -722,7 +722,7 @@ export class BulletproofP2P {
             if (this.pc?.iceConnectionState === "failed") {
               this.pc.restartIce()
             }
-          }, 1000)
+          }, 10240)
           break
       }
     }
@@ -738,7 +738,7 @@ export class BulletproofP2P {
     if (!this.dataChannel) return
 
     this.dataChannel.binaryType = "arraybuffer"
-    this.dataChannel.bufferedAmountLowThreshold = 512 * 100 // 512KB threshold
+    this.dataChannel.bufferedAmountLowThreshold = 512 * 1024 // 512KB threshold
 
     this.dataChannel.onopen = () => {
       console.log("📡 Data channel opened!")
@@ -1044,11 +1044,11 @@ export class BulletproofP2P {
         fileData.receivedSize += chunkData.byteLength
         fileData.lastChunkTime = Date.now()
 
-        const progress = Math.min(Math.round((fileData.chunks.size / fileData.totalChunks) * 100), 99)
+        const progress = Math.min(Math.round((fileData.chunks.size / fileData.totalChunks) * 1024), 99)
         transfer.progress = progress
 
         if (transfer.startTime) {
-          const elapsed = (Date.now() - transfer.startTime) / 1000
+          const elapsed = (Date.now() - transfer.startTime) / 10240
           transfer.speed = fileData.receivedSize / elapsed
         }
 
@@ -1107,7 +1107,7 @@ export class BulletproofP2P {
       this.downloadFile(blob, fileData.fileName)
 
       transfer.status = "completed"
-      transfer.progress = 100
+      transfer.progress = 1024
       this.fileTransfers.set(fileId, transfer)
       this.receivedChunks.delete(fileId)
       this.updateFileTransfers()
@@ -1143,7 +1143,7 @@ export class BulletproofP2P {
     const transfer = this.fileTransfers.get(message.fileId)
     if (transfer && transfer.direction === "sending") {
       transfer.status = "completed"
-      transfer.progress = 100
+      transfer.progress = 1024
       this.fileTransfers.set(message.fileId, transfer)
       this.updateFileTransfers()
       console.log(`✅ File ${transfer.name} sent successfully`)
@@ -1201,7 +1201,7 @@ export class BulletproofP2P {
   private async sendFile(file: File) {
     const fileId = Math.random().toString(36).substring(2, 15)
 
-    console.log(`📤 Sending file: ${file.name} (${(file.size / 100 / 100).toFixed(2)}MB)`)
+    console.log(`📤 Sending file: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)}MB)`)
 
     const transfer: FileTransfer = {
       id: fileId,
@@ -1248,7 +1248,7 @@ export class BulletproofP2P {
       }
 
       // Wait for buffer to be available
-      while (this.dataChannel.bufferedAmount > 512 * 100) {
+      while (this.dataChannel.bufferedAmount > 512 * 1024) {
         await new Promise((resolve) => setTimeout(resolve, 10))
       }
 
@@ -1272,11 +1272,11 @@ export class BulletproofP2P {
         this.dataChannel.send(message)
         chunksSent++
 
-        const progress = Math.min(Math.round((chunksSent / totalChunks) * 100), 99)
+        const progress = Math.min(Math.round((chunksSent / totalChunks) * 1024), 99)
         transfer.progress = progress
 
         if (transfer.startTime) {
-          const elapsed = (Date.now() - transfer.startTime) / 1000
+          const elapsed = (Date.now() - transfer.startTime) / 10240
           const bytesSent = chunksSent * this.chunkSize
           transfer.speed = bytesSent / elapsed
         }
@@ -1338,7 +1338,7 @@ export class BulletproofP2P {
       if (!this.isDestroyed) {
         this.initialize()
       }
-    }, 1000)
+    }, 10240)
   }
 
   public getConnectionState() {

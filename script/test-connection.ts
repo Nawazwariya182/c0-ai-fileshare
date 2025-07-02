@@ -48,7 +48,7 @@ async function testConnection() {
       console.log("   npm run dev:signaling")
       ws.close()
       process.exit(1)
-    }, 10000)
+    }, 102400)
   } catch (error) {
     console.error("❌ Test failed:", error)
     process.exit(1)

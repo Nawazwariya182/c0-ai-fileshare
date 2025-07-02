@@ -8,8 +8,8 @@ export interface SessionInfo {
 }
 
 export class SessionManager {
-  private static readonly SESSION_DURATION = 10 * 60 * 1000 // 10 minutes
-  private static readonly WARNING_TIME = 2 * 60 * 1000 // 2 minutes before expiry
+  private static readonly SESSION_DURATION = 10 * 60 * 10240 // 10 minutes
+  private static readonly WARNING_TIME = 2 * 60 * 10240 // 2 minutes before expiry
   private static sessions = new Map<string, SessionInfo>()
 
   static createSession(sessionId: string): SessionInfo {
@@ -92,7 +92,7 @@ export class SessionManager {
 
     this.sessions.forEach((session, sessionId) => {
       // Remove sessions that expired more than 1 hour ago
-      if (session.isExpired && (now.getTime() - session.expiresAt.getTime()) > 60 * 60 * 1000) {
+      if (session.isExpired && (now.getTime() - session.expiresAt.getTime()) > 60 * 60 * 10240) {
         expiredSessions.push(sessionId)
       }
     })
@@ -113,7 +113,7 @@ export class SessionManager {
     if (typeof window !== 'undefined') {
       setInterval(() => {
         this.cleanupExpiredSessions()
-      }, 60 * 1000) // Cleanup every minute
+      }, 60 * 10240) // Cleanup every minute
     }
   }
 }

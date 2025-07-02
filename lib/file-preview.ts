@@ -7,8 +7,8 @@ export interface PreviewResult {
 }
 
 export class FilePreviewGenerator {
-  private static readonly MAX_TEXT_SIZE = 100 * 100 // 1MB
-  private static readonly MAX_IMAGE_SIZE = 10 * 100 * 100 // 10MB
+  private static readonly MAX_TEXT_SIZE = 1024 * 1024 // 1MB
+  private static readonly MAX_IMAGE_SIZE = 10 * 1024 * 1024 // 10MB
 
   static async generatePreview(file: File): Promise<PreviewResult> {
     try {
@@ -118,8 +118,8 @@ export class FilePreviewGenerator {
       reader.onload = () => {
         const content = reader.result as string
         // Truncate very long content
-        const truncated = content.length > 10000 ? 
-          content.substring(0, 10000) + '\n\n... (truncated)' : 
+        const truncated = content.length > 102400 ? 
+          content.substring(0, 102400) + '\n\n... (truncated)' : 
           content
         
         resolve({

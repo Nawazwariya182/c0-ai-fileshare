@@ -8,7 +8,7 @@ export class CompressionUtils {
     
     try {
       // Test compression support
-      const testData = new Uint8Array(100).fill(65) // Repeating 'A'
+      const testData = new Uint8Array(1024).fill(65) // Repeating 'A'
       const compressed = await this.compress(testData)
       const decompressed = await this.decompress(compressed)
       
@@ -104,14 +104,14 @@ export class CompressionUtils {
     }
   }
   
-  public static shouldCompress(data: Uint8Array, threshold: number = 100): boolean {
+  public static shouldCompress(data: Uint8Array, threshold: number = 1024): boolean {
     // Don't compress small chunks or already compressed data
     if (data.length < threshold) {
       return false
     }
     
     // Simple entropy check - if data has low entropy, it's likely compressible
-    const entropy = this.calculateEntropy(data.slice(0, Math.min(100, data.length)))
+    const entropy = this.calculateEntropy(data.slice(0, Math.min(1024, data.length)))
     return entropy < 7.5 // Threshold for compression worthiness
   }
   

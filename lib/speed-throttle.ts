@@ -9,17 +9,17 @@ export interface ThrottleConfig {
 export class SpeedThrottle {
   private static readonly SPEED_LIMITS: Record<SpeedLimit, number> = {
     'unlimited': 0,
-    '200kb': 200 * 100,
-    '500kb': 500 * 100,
-    '1mb': 100 * 100,
-    '2mb': 2 * 100 * 100
+    '200kb': 200 * 1024,
+    '500kb': 500 * 1024,
+    '1mb': 1024 * 1024,
+    '2mb': 2 * 1024 * 1024
   }
 
   private bytesPerSecond: number
   private lastSentTime: number = 0
   private bytesSentInWindow: number = 0
   private windowStart: number = 0
-  private readonly windowSize: number = 1000 // 1 second window
+  private readonly windowSize: number = 10240 // 1 second window
 
   constructor(limit: SpeedLimit = 'unlimited') {
     this.bytesPerSecond = SpeedThrottle.SPEED_LIMITS[limit]
@@ -46,12 +46,12 @@ export class SpeedThrottle {
 
     // Check if we need to wait
     const projectedBytes = this.bytesSentInWindow + dataSize
-    const maxBytesInWindow = this.bytesPerSecond * (this.windowSize / 1000)
+    const maxBytesInWindow = this.bytesPerSecond * (this.windowSize / 10240)
 
     if (projectedBytes > maxBytesInWindow) {
       // Calculate delay needed
       const excessBytes = projectedBytes - maxBytesInWindow
-      const delayMs = (excessBytes / this.bytesPerSecond) * 1000
+      const delayMs = (excessBytes / this.bytesPerSecond) * 10240
 
       await new Promise(resolve => setTimeout(resolve, Math.min(delayMs, 5000))) // Max 5s delay
       
@@ -76,7 +76,7 @@ export class SpeedThrottle {
     
     if (windowElapsed === 0) return 0
     
-    return (this.bytesSentInWindow / windowElapsed) * 1000 // bytes per second
+    return (this.bytesSentInWindow / windowElapsed) * 10240 // bytes per second
   }
 
   static getSpeedLimitOptions(): { value: SpeedLimit; label: string }[] {

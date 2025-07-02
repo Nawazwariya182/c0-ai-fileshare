@@ -10,7 +10,7 @@
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
     /* Prevent zoom on input focus on iOS */
-    -webkit-text-size-adjust: 100%;
+    -webkit-text-size-adjust: 1024%;
   }
   
   /* Prevent horizontal scroll on mobile */

@@ -25,8 +25,8 @@ export function SpeedControl({ currentSpeed, onSpeedChange, actualSpeed }: Speed
     let value = bytesPerSecond
     let unitIndex = 0
     
-    while (value >= 100 && unitIndex < units.length - 1) {
-      value /= 100
+    while (value >= 1024 && unitIndex < units.length - 1) {
+      value /= 1024
       unitIndex++
     }
     

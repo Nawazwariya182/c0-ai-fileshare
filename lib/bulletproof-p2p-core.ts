@@ -62,7 +62,7 @@ export class BulletproofP2PCore {
     tertiary: null,
     dataChannels: new Map(),
     activeChannel: null,
-    connectionHealth: 100,
+    connectionHealth: 1024,
     lastSuccessfulPing: 0,
     reconnectionAttempts: 0,
     isConnected: false,
@@ -87,7 +87,7 @@ export class BulletproofP2PCore {
     strength: "good",
     latency: 0,
     bandwidth: 0,
-    stability: 100,
+    stability: 1024,
     isMobile: false,
     isBackground: false,
   }
@@ -165,7 +165,7 @@ export class BulletproofP2PCore {
     // Remove duplicates and initialize health scores
     this.signalingUrls = [...new Set(this.signalingUrls)]
     this.signalingUrls.forEach(url => {
-      this.signalingHealth.set(url, 100)
+      this.signalingHealth.set(url, 1024)
     })
 
     console.log(`🔗 Initialized ${this.signalingUrls.length} signaling servers`)
@@ -343,7 +343,7 @@ export class BulletproofP2PCore {
             connections.set(data.sessionId, {
               ...data,
               lastSeen: Date.now(),
-              health: 100
+              health: 1024
             });
             break;
             
@@ -533,9 +533,9 @@ export class BulletproofP2PCore {
           this.switchToBackupSignaling()
         }
 
-        if (!this.isDestroyed && event.code !== 1000) {
+        if (!this.isDestroyed && event.code !== 10240) {
           // Exponential backoff reconnection
-          const delay = Math.min(1000 * Math.pow(2, index), 30000)
+          const delay = Math.min(10240 * Math.pow(2, index), 30000)
           setTimeout(() => this.createSignalingConnection(url, index), delay)
         }
       }
@@ -551,7 +551,7 @@ export class BulletproofP2PCore {
 
   private updateSignalingHealth(url: string, delta: number) {
     const currentHealth = this.signalingHealth.get(url) || 0
-    const newHealth = Math.max(0, Math.min(100, currentHealth + delta))
+    const newHealth = Math.max(0, Math.min(1024, currentHealth + delta))
     this.signalingHealth.set(url, newHealth)
 
     // Reorder URLs by health
@@ -586,7 +586,7 @@ export class BulletproofP2PCore {
 
     // Adaptive heartbeat based on network conditions
     const interval = this.networkConditions.isMobile ? 
-      (this.backgroundMode ? 2000 : 5000) : 10000
+      (this.backgroundMode ? 2000 : 5000) : 102400
 
     this.heartbeatInterval = setInterval(() => {
       if (this.activeSignaling?.readyState === WebSocket.OPEN) {
@@ -614,7 +614,7 @@ export class BulletproofP2PCore {
       if (!this.isDestroyed) {
         this.connectionState.backup = this.createOptimizedPeerConnection('backup')
       }
-    }, 1000)
+    }, 10240)
 
     setTimeout(() => {
       if (!this.isDestroyed) {
@@ -687,7 +687,7 @@ export class BulletproofP2PCore {
     switch (state) {
       case 'connected':
         console.log(`✅ ${type} P2P connection established`)
-        this.connectionState.connectionHealth = 100
+        this.connectionState.connectionHealth = 1024
         this.connectionState.lastSuccessfulPing = Date.now()
         this.performanceMetrics.successfulConnections++
 
@@ -740,7 +740,7 @@ export class BulletproofP2PCore {
           if (pc.iceConnectionState === 'disconnected') {
             pc.restartIce()
           }
-        }, 1000)
+        }, 10240)
         break
 
       case 'failed':
@@ -759,7 +759,7 @@ export class BulletproofP2PCore {
         console.log(`🔄 Restarting ICE for ${type}`)
         pc.restartIce()
       }
-    }, 1000)
+    }, 10240)
 
     // Switch to backup if recovery fails
     setTimeout(() => {
@@ -857,11 +857,11 @@ export class BulletproofP2PCore {
         console.error('❌ Immediate reconnection failed:', error)
         this.scheduleExponentialBackoffReconnection()
       }
-    }, 100) // 100ms delay for immediate reconnection
+    }, 1024) // 1024ms delay for immediate reconnection
   }
 
   private scheduleExponentialBackoffReconnection() {
-    const delay = Math.min(1000 * Math.pow(2, this.connectionState.reconnectionAttempts - 1), 30000)
+    const delay = Math.min(10240 * Math.pow(2, this.connectionState.reconnectionAttempts - 1), 30000)
     console.log(`🔄 Scheduling reconnection in ${delay}ms`)
 
     this.reconnectTimeout = setTimeout(() => {
@@ -1080,7 +1080,7 @@ export class BulletproofP2PCore {
         (this.performanceMetrics.averageLatency + latency) / 2
 
       this.connectionState.lastSuccessfulPing = Date.now()
-      this.connectionState.connectionHealth = Math.min(100, this.connectionState.connectionHealth + 1)
+      this.connectionState.connectionHealth = Math.min(1024, this.connectionState.connectionHealth + 1)
 
       this.updateConnectionQuality()
     }
@@ -1240,7 +1240,7 @@ export class BulletproofP2PCore {
     }
 
     console.log(`📤 Starting file transfer: ${files.length} files`)
-    console.log(`📊 Total size: ${(files.reduce((sum, f) => sum + f.size, 0) / 100 / 100).toFixed(1)}MB`)
+    console.log(`📊 Total size: ${(files.reduce((sum, f) => sum + f.size, 0) / 1024 / 1024).toFixed(1)}MB`)
 
     // Sort files by size for optimal transfer order
     const sortedFiles = files.sort((a, b) => a.size - b.size)
@@ -1339,12 +1339,12 @@ export class BulletproofP2PCore {
         activeReads.delete(currentChunkId)
 
         // Update progress
-        const progress = Math.min(Math.round((currentOffset / file.size) * 100), 100)
+        const progress = Math.min(Math.round((currentOffset / file.size) * 1024), 1024)
         transfer.progress = progress
         transfer.lastActivity = Date.now()
 
         // Calculate speed
-        const elapsed = (Date.now() - transfer.startTime) / 1000
+        const elapsed = (Date.now() - transfer.startTime) / 10240
         transfer.speed = currentOffset / elapsed
         this.performanceMetrics.totalBytesTransferred += chunkSize
 
@@ -1440,7 +1440,7 @@ export class BulletproofP2PCore {
     } catch (error) {
       if (retryCount < maxRetries) {
         console.log(`🔄 Retrying chunk ${chunkId} (attempt ${retryCount + 1})`)
-        await new Promise(resolve => setTimeout(resolve, 100 * (retryCount + 1)))
+        await new Promise(resolve => setTimeout(resolve, 1024 * (retryCount + 1)))
         return this.sendChunkWithRetry(fileId, chunkId, chunk, retryCount + 1)
       } else {
         throw error
@@ -1477,7 +1477,7 @@ export class BulletproofP2PCore {
     console.log(`✅ Completing file transfer: ${transfer.name}`)
 
     transfer.status = 'completed'
-    transfer.progress = 100
+    transfer.progress = 1024
 
     // Send completion message
     this.sendDataChannelMessage({
@@ -1496,7 +1496,7 @@ export class BulletproofP2PCore {
 
     // Update performance metrics
     if (transfer.status === 'completed') {
-      const transferTime = (Date.now() - transfer.startTime) / 1000
+      const transferTime = (Date.now() - transfer.startTime) / 10240
       const speed = transfer.size / transferTime
       this.performanceMetrics.averageTransferSpeed = 
         (this.performanceMetrics.averageTransferSpeed + speed) / 2
@@ -1549,11 +1549,11 @@ export class BulletproofP2PCore {
       transfer.lastActivity = Date.now()
 
       // Update progress
-      const progress = Math.round((transfer.receivedChunks.size / transfer.totalChunks) * 100)
+      const progress = Math.round((transfer.receivedChunks.size / transfer.totalChunks) * 1024)
       transfer.progress = progress
 
       // Calculate speed
-      const elapsed = (Date.now() - transfer.startTime) / 1000
+      const elapsed = (Date.now() - transfer.startTime) / 10240
       const receivedBytes = Array.from(transfer.chunks.values())
         .reduce((total, chunk) => total + chunk.byteLength, 0)
       transfer.speed = receivedBytes / elapsed
@@ -1599,7 +1599,7 @@ export class BulletproofP2PCore {
       this.downloadFile(blob, transfer.name)
 
       transfer.status = 'completed'
-      transfer.progress = 100
+      transfer.progress = 1024
       this.handleTransferCompletion(transfer)
     } catch (error) {
       console.error(`❌ Error completing file reception: ${transfer.name}`, error)
@@ -1746,17 +1746,17 @@ export class BulletproofP2PCore {
     console.log('📊 Performance Metrics:', {
       connectionHealth: this.connectionState.connectionHealth,
       averageLatency: this.performanceMetrics.averageLatency,
-      averageSpeed: Math.round(this.performanceMetrics.averageTransferSpeed / 100) + ' KB/s',
-      totalTransferred: Math.round(this.performanceMetrics.totalBytesTransferred / 100 / 100) + ' MB',
+      averageSpeed: Math.round(this.performanceMetrics.averageTransferSpeed / 1024) + ' KB/s',
+      totalTransferred: Math.round(this.performanceMetrics.totalBytesTransferred / 1024 / 1024) + ' MB',
       successRate: Math.round((this.performanceMetrics.successfulConnections / 
-        (this.performanceMetrics.successfulConnections + this.performanceMetrics.failedConnections)) * 100) + '%',
+        (this.performanceMetrics.successfulConnections + this.performanceMetrics.failedConnections)) * 1024) + '%',
     })
   }
 
   private startHealthMonitoring(): void {
     this.healthMonitorInterval = setInterval(() => {
       this.monitorConnectionHealth()
-    }, 10000) // Every 10 seconds
+    }, 102400) // Every 10 seconds
   }
 
   private monitorConnectionHealth(): void {

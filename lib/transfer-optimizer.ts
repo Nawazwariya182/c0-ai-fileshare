@@ -30,13 +30,13 @@ export class TransferOptimizer {
   private slowStartThreshold: number = 16
   private inSlowStart: boolean = true
   
-  private rtt: number = 100 // Round trip time in ms
+  private rtt: number = 1024 // Round trip time in ms
   private rttVariance: number = 50
   private packetLoss: number = 0
   private bandwidth: number = 0 // Bytes per second
   
   private lastAdjustment: number = Date.now()
-  private adjustmentInterval: number = 1000 // 1 second
+  private adjustmentInterval: number = 10240 // 1 second
   
   private stats: TransferStats = {
     bytesTransferred: 0,
@@ -45,7 +45,7 @@ export class TransferOptimizer {
     eta: 0,
     packetsLost: 0,
     retransmissions: 0,
-    efficiency: 100
+    efficiency: 1024
   }
 
   constructor() {
@@ -133,14 +133,14 @@ export class TransferOptimizer {
   }
 
   public reportSuccessfulTransmission(bytes: number, duration: number) {
-    this.bandwidth = bytes / (duration / 1000) // bytes per second
+    this.bandwidth = bytes / (duration / 10240) // bytes per second
     this.stats.bytesTransferred += bytes
     this.stats.speed = this.bandwidth
     
     if (this.stats.totalBytes > 0) {
       const remaining = this.stats.totalBytes - this.stats.bytesTransferred
       this.stats.eta = remaining / this.bandwidth
-      this.stats.efficiency = (this.stats.bytesTransferred / (this.stats.bytesTransferred + this.stats.retransmissions * this.chunkSize)) * 100
+      this.stats.efficiency = (this.stats.bytesTransferred / (this.stats.bytesTransferred + this.stats.retransmissions * this.chunkSize)) * 1024
     }
     
     // Increase congestion window on success
@@ -186,7 +186,7 @@ export class TransferOptimizer {
     
     // Adaptive chunk size based on RTT and bandwidth
     const optimalChunkSize = Math.min(
-      this.bandwidth * (this.rtt / 1000) * 2, // 2x bandwidth-delay product
+      this.bandwidth * (this.rtt / 10240) * 2, // 2x bandwidth-delay product
       this.maxChunkSize
     )
     
@@ -203,7 +203,7 @@ export class TransferOptimizer {
     // Adjust concurrent chunks based on performance
     if (this.bandwidth > 0 && this.packetLoss < 0.01) {
       const targetConcurrency = Math.min(
-        Math.ceil(this.bandwidth / (this.chunkSize / (this.rtt / 1000))),
+        Math.ceil(this.bandwidth / (this.chunkSize / (this.rtt / 10240))),
         this.maxConcurrentChunks
       )
       
@@ -226,7 +226,7 @@ export class TransferOptimizer {
       eta: 0,
       packetsLost: 0,
       retransmissions: 0,
-      efficiency: 100
+      efficiency: 1024
     }
   }
 }
@@ -355,12 +355,12 @@ export class ConnectionStabilizer {
   private dataChannel: RTCDataChannel
   private sendQueue: ArrayBuffer[] = []
   private isProcessing: boolean = false
-  private maxQueueSize: number = 100
+  private maxQueueSize: number = 1024
   private sendDelay: number = 0 // Adaptive delay between sends
   
   private lastSendTime: number = 0
   private sendTimes: number[] = []
-  private maxSendTimeHistory: number = 100
+  private maxSendTimeHistory: number = 1024
   
   constructor(dataChannel: RTCDataChannel) {
     this.dataChannel = dataChannel
@@ -371,7 +371,7 @@ export class ConnectionStabilizer {
     setInterval(() => {
       if (this.dataChannel.readyState === 'open') {
         const bufferedAmount = this.dataChannel.bufferedAmount
-        const maxBuffer = 16 * 100 * 100 // 16MB buffer limit
+        const maxBuffer = 16 * 1024 * 1024 // 16MB buffer limit
         
         if (bufferedAmount > maxBuffer * 0.8) {
           // Buffer is getting full, increase delay
@@ -381,7 +381,7 @@ export class ConnectionStabilizer {
           this.sendDelay = Math.max(this.sendDelay - 1, 0)
         }
       }
-    }, 100)
+    }, 1024)
   }
   
   public async sendData(data: ArrayBuffer): Promise<boolean> {
@@ -410,7 +410,7 @@ export class ConnectionStabilizer {
       
       try {
         // Wait for buffer to have space
-        while (this.dataChannel.bufferedAmount > 8 * 100 * 100) { // 8MB threshold
+        while (this.dataChannel.bufferedAmount > 8 * 1024 * 1024) { // 8MB threshold
           await this.sleep(10)
         }
         
@@ -433,7 +433,7 @@ export class ConnectionStabilizer {
         console.error('❌ Failed to send data:', error)
         // Put the data back at the front of the queue for retry
         this.sendQueue.unshift(data)
-        await this.sleep(100) // Wait before retry
+        await this.sleep(1024) // Wait before retry
       }
     }
     

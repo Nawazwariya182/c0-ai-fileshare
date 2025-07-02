@@ -1,4 +1,4 @@
-// Bulletproof Connection Engine - Ensures 100% reliable P2P connections
+// Bulletproof Connection Engine - Ensures 1024% reliable P2P connections
 interface ConnectionState {
   primary: RTCPeerConnection | null
   backup: RTCPeerConnection | null
@@ -49,7 +49,7 @@ export class BulletproofConnectionEngine {
     tertiary: null,
     dataChannels: new Map(),
     activeChannel: null,
-    connectionHealth: 100,
+    connectionHealth: 1024,
     lastSuccessfulPing: 0,
     reconnectionAttempts: 0,
   }
@@ -72,7 +72,7 @@ export class BulletproofConnectionEngine {
     strength: "good",
     latency: 0,
     bandwidth: 0,
-    stability: 100,
+    stability: 1024,
   }
 
   // Background persistence system
@@ -127,7 +127,7 @@ export class BulletproofConnectionEngine {
 
     // Initialize health scores
     this.signalingUrls.forEach(url => {
-      this.signalingHealth.set(url, 100)
+      this.signalingHealth.set(url, 1024)
     })
   }
 
@@ -238,9 +238,9 @@ export class BulletproofConnectionEngine {
           this.switchToBackupSignaling()
         }
 
-        if (!this.isDestroyed && event.code !== 1000) {
+        if (!this.isDestroyed && event.code !== 10240) {
           // Immediate reconnection with exponential backoff
-          const delay = Math.min(100 * Math.pow(2, index), 5000)
+          const delay = Math.min(1024 * Math.pow(2, index), 5000)
           setTimeout(() => this.createSignalingConnection(url, index), delay)
         }
       }
@@ -256,7 +256,7 @@ export class BulletproofConnectionEngine {
 
   private updateSignalingHealth(url: string, delta: number) {
     const currentHealth = this.signalingHealth.get(url) || 0
-    const newHealth = Math.max(0, Math.min(100, currentHealth + delta))
+    const newHealth = Math.max(0, Math.min(1024, currentHealth + delta))
     this.signalingHealth.set(url, newHealth)
 
     // Reorder URLs by health for future connections
@@ -301,7 +301,7 @@ export class BulletproofConnectionEngine {
       if (!this.isDestroyed) {
         this.connectionState.tertiary = this.createOptimizedPeerConnection("tertiary")
       }
-    }, 1000)
+    }, 10240)
   }
 
   private createOptimizedPeerConnection(type: string): RTCPeerConnection {
@@ -369,7 +369,7 @@ export class BulletproofConnectionEngine {
     switch (state) {
       case "connected":
         console.log(`✅ ${type} P2P connection established`)
-        this.connectionState.connectionHealth = 100
+        this.connectionState.connectionHealth = 1024
         this.connectionState.lastSuccessfulPing = Date.now()
         this.lastConnectionTime = Date.now()
         this.performanceMetrics.successfulConnections++
@@ -424,7 +424,7 @@ export class BulletproofConnectionEngine {
           if (pc.iceConnectionState === "disconnected") {
             pc.restartIce()
           }
-        }, 1000)
+        }, 10240)
         break
 
       case "failed":
@@ -443,7 +443,7 @@ export class BulletproofConnectionEngine {
         console.log(`🔄 Restarting ICE for ${type} connection`)
         pc.restartIce()
       }
-    }, 1000)
+    }, 10240)
 
     // If still not connected after 5 seconds, switch to backup
     setTimeout(() => {
@@ -551,7 +551,7 @@ export class BulletproofConnectionEngine {
   }
 
   private scheduleExponentialBackoffReconnection() {
-    const delay = Math.min(1000 * Math.pow(2, this.connectionState.reconnectionAttempts - 1), 30000)
+    const delay = Math.min(10240 * Math.pow(2, this.connectionState.reconnectionAttempts - 1), 30000)
     console.log(`🔄 Scheduling reconnection in ${delay}ms`)
 
     setTimeout(() => {
@@ -990,12 +990,12 @@ export class BulletproofConnectionEngine {
         activeReads.delete(currentChunkId)
         
         // Update progress
-        const progress = Math.min(Math.round((currentOffset / file.size) * 100), 100)
+        const progress = Math.min(Math.round((currentOffset / file.size) * 1024), 1024)
         transfer.progress = progress
         transfer.lastActivity = Date.now()
 
         // Calculate speed
-        const elapsed = (Date.now() - transfer.startTime) / 1000
+        const elapsed = (Date.now() - transfer.startTime) / 10240
         transfer.speed = currentOffset / elapsed
 
         this.onFileTransferUpdate?.(this.getAllTransfers())
@@ -1090,7 +1090,7 @@ export class BulletproofConnectionEngine {
     } catch (error) {
       if (retryCount < maxRetries) {
         console.log(`🔄 Retrying chunk ${chunkId} (attempt ${retryCount + 1})`)
-        await new Promise(resolve => setTimeout(resolve, 100 * (retryCount + 1)))
+        await new Promise(resolve => setTimeout(resolve, 1024 * (retryCount + 1)))
         return this.sendChunkWithRetry(fileId, chunkId, chunk, retryCount + 1)
       } else {
         throw error
@@ -1130,7 +1130,7 @@ export class BulletproofConnectionEngine {
     console.log(`✅ Completing file transfer: ${transfer.name}`)
 
     transfer.status = "completed"
-    transfer.progress = 100
+    transfer.progress = 1024
 
     // Send completion message
     this.sendDataChannelMessage({
@@ -1152,7 +1152,7 @@ export class BulletproofConnectionEngine {
 
     // Update performance metrics
     if (transfer.status === "completed") {
-      const transferTime = (Date.now() - transfer.startTime) / 1000
+      const transferTime = (Date.now() - transfer.startTime) / 10240
       const speed = transfer.size / transferTime
       this.performanceMetrics.averageTransferSpeed = 
         (this.performanceMetrics.averageTransferSpeed + speed) / 2
@@ -1204,11 +1204,11 @@ export class BulletproofConnectionEngine {
       transfer.lastActivity = Date.now()
 
       // Update progress
-      const progress = Math.round((transfer.receivedChunks.size / transfer.totalChunks) * 100)
+      const progress = Math.round((transfer.receivedChunks.size / transfer.totalChunks) * 1024)
       transfer.progress = progress
 
       // Calculate speed
-      const elapsed = (Date.now() - transfer.startTime) / 1000
+      const elapsed = (Date.now() - transfer.startTime) / 10240
       const receivedBytes = Array.from(transfer.chunks.values())
         .reduce((total, chunk) => total + chunk.byteLength, 0)
       transfer.speed = receivedBytes / elapsed
@@ -1245,7 +1245,7 @@ export class BulletproofConnectionEngine {
       this.downloadFile(blob, transfer.name)
 
       transfer.status = "completed"
-      transfer.progress = 100
+      transfer.progress = 1024
       this.handleTransferCompletion(transfer)
     } catch (error) {
       console.error(`❌ Error completing file reception: ${transfer.name}`, error)
@@ -1345,10 +1345,10 @@ export class BulletproofConnectionEngine {
 
   private calculateNetworkStability(): number {
     // Calculate based on connection health and recent disconnections
-    const healthFactor = this.connectionState.connectionHealth / 100
+    const healthFactor = this.connectionState.connectionHealth / 1024
     const reconnectionPenalty = Math.max(0, 1 - (this.connectionState.reconnectionAttempts * 0.1))
     
-    return Math.round(healthFactor * reconnectionPenalty * 100)
+    return Math.round(healthFactor * reconnectionPenalty * 1024)
   }
 
   private adaptToNetworkConditions(): void {
@@ -1464,7 +1464,7 @@ export class BulletproofConnectionEngine {
             connections.set(data.sessionId, {
               ...data,
               lastSeen: Date.now(),
-              connectionHealth: 100
+              connectionHealth: 1024
             });
             console.log('📱 Connection registered for background persistence:', data.sessionId);
             break;
@@ -1510,7 +1510,7 @@ export class BulletproofConnectionEngine {
           
           connections.forEach((conn, sessionId) => {
             // Send aggressive keep-alive in background mode
-            const interval = backgroundMode ? 1000 : 5000;
+            const interval = backgroundMode ? 10240 : 5000;
             
             if (now - conn.lastSeen < 300000) { // 5 minutes
               self.clients.matchAll().then(clients => {
@@ -1525,7 +1525,7 @@ export class BulletproofConnectionEngine {
               });
             }
           });
-        }, backgroundMode ? 1000 : 5000);
+        }, backgroundMode ? 10240 : 5000);
       }
 
       function intensifyKeepAlive() {
@@ -1749,7 +1749,7 @@ export class BulletproofConnectionEngine {
     this.maxConcurrentFiles = 1
 
     // Increase heartbeat frequency to prevent disconnection
-    this.startConnectionHealthMonitoring(1000) // Every second in background
+    this.startConnectionHealthMonitoring(10240) // Every second in background
 
     // Reduce buffer thresholds to prevent memory issues
     if (this.connectionState.activeChannel) {
@@ -1823,7 +1823,7 @@ export class BulletproofConnectionEngine {
     } else if (connectedCount < connections.length / 2) {
       this.connectionState.connectionHealth = Math.max(0, this.connectionState.connectionHealth - 20)
     } else {
-      this.connectionState.connectionHealth = Math.min(100, this.connectionState.connectionHealth + 5)
+      this.connectionState.connectionHealth = Math.min(1024, this.connectionState.connectionHealth + 5)
     }
   }
 
@@ -1997,7 +1997,7 @@ export class BulletproofConnectionEngine {
     // Close all connections
     this.signalingConnections.forEach(ws => {
       if (ws.readyState === WebSocket.OPEN) {
-        ws.close(1000, "Engine destroyed")
+        ws.close(10240, "Engine destroyed")
       }
     })
 

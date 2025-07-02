@@ -36,7 +36,7 @@ class RockSolidSignalingServer {
     reconnections: 0,
     errors: 0,
     p2pConnections: 0,
-    stabilityScore: 100,
+    stabilityScore: 1024,
   }
 
   constructor(port = process.env.PORT || 8080) {
@@ -104,10 +104,10 @@ class RockSolidSignalingServer {
     this.wss = new WebSocketServer({
       server: this.server,
       perMessageDeflate: {
-        threshold: 100,
+        threshold: 1024,
         concurrencyLimit: 10,
       },
-      maxPayload: 100 * 100 * 100, // 100MB
+      maxPayload: 1024 * 1024 * 1024, // 1GB
       clientTracking: true,
       verifyClient: (info) => {
         const origin = info.origin
@@ -142,8 +142,8 @@ class RockSolidSignalingServer {
     })
 
     // Session management with longer timeouts
-    setInterval(this.cleanup.bind(this), 5 * 60 * 1000) // Every 5 minutes
-    setInterval(this.logStats.bind(this), 30 * 1000) // Every 30 seconds
+    setInterval(this.cleanup.bind(this), 5 * 60 * 10240) // Every 5 minutes
+    setInterval(this.logStats.bind(this), 30 * 10240) // Every 30 seconds
 
     this.server.listen(port, "0.0.0.0", () => {
       console.log(`✅ Rock-solid server running on port ${port}`)
@@ -164,7 +164,7 @@ class RockSolidSignalingServer {
           message: "Server maintenance - reconnect in 5 seconds",
           reconnectDelay: 5000,
         })
-        ws.close(1000, "Server maintenance")
+        ws.close(10240, "Server maintenance")
       }
     })
     this.server.close(() => {
@@ -226,7 +226,7 @@ class RockSolidSignalingServer {
 
         if (missedPings > maxMissedPings) {
           console.log(`⚠️ Client ${clientIP} missed ${missedPings} pings - closing`)
-          ws.close(1008, "Connection timeout")
+          ws.close(10248, "Connection timeout")
           clearInterval(pingInterval)
         }
       } else {
@@ -299,7 +299,7 @@ class RockSolidSignalingServer {
         lastActivity: new Date(),
         connectionAttempts: 0,
         isStable: false,
-        qualityScore: 100,
+        qualityScore: 1024,
       }
       this.sessions.set(sessionId, session)
       console.log(`🆕 Created rock-solid session: ${sessionId}`)
@@ -381,7 +381,7 @@ class RockSolidSignalingServer {
       isInitiator,
       sessionCreated: session.createdAt.toISOString(),
       serverCapabilities: {
-        maxFileSize: "100MB",
+        maxFileSize: "1GB",
         chunkSize: "32KB",
         resumableTransfers: true,
         fixedReconnection: true,
@@ -514,7 +514,7 @@ class RockSolidSignalingServer {
           const currentSession = this.sessions.get(sessionId)
           if (currentSession) {
             const user = currentSession.users.get(disconnectedUserId!)
-            if (user && Date.now() - user.lastSeen.getTime() > 10 * 60 * 1000) {
+            if (user && Date.now() - user.lastSeen.getTime() > 10 * 60 * 10240) {
               // 10 minutes grace period
               currentSession.users.delete(disconnectedUserId!)
               console.log(`🗑️ Removed user ${disconnectedUserId} after extended grace period`)
@@ -534,7 +534,7 @@ class RockSolidSignalingServer {
             }
           }
         },
-        10 * 60 * 1000,
+        10 * 60 * 10240,
       ) // 10 minutes
     }
   }
@@ -589,7 +589,7 @@ class RockSolidSignalingServer {
       const inactiveTime = now.getTime() - session.lastActivity.getTime()
 
       // Extended timeout for better stability - 2 hours
-      const timeoutDuration = 2 * 60 * 60 * 1000
+      const timeoutDuration = 2 * 60 * 60 * 10240
 
       if (inactiveTime > timeoutDuration) {
         expiredSessions.push(sessionId)
@@ -598,7 +598,7 @@ class RockSolidSignalingServer {
         const inactiveUsers: string[] = []
         session.users.forEach((userData, userId) => {
           const userInactiveTime = now.getTime() - userData.lastSeen.getTime()
-          if (userInactiveTime > 30 * 60 * 1000) {
+          if (userInactiveTime > 30 * 60 * 10240) {
             // 30 minutes for users
             inactiveUsers.push(userId)
           }
@@ -624,7 +624,7 @@ class RockSolidSignalingServer {
             message: "Session expired due to inactivity",
             reconnectDelay: 3000,
           })
-          userData.ws.close(1000, "Session expired")
+          userData.ws.close(10240, "Session expired")
         })
         this.sessions.delete(sessionId)
         console.log(`⏰ Expired session: ${sessionId}`)
@@ -648,7 +648,7 @@ class RockSolidSignalingServer {
           `🔗 Active Sessions: ${activeSessions
             .map(
               ([id, session]) =>
-                `${id}(${session.users.size}/2, ${Math.round((Date.now() - session.createdAt.getTime()) / 1000 / 60)}min)`,
+                `${id}(${session.users.size}/2, ${Math.round((Date.now() - session.createdAt.getTime()) / 10240 / 60)}min)`,
             )
             .join(", ")}`,
         )

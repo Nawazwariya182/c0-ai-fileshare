@@ -188,7 +188,7 @@ export default function SessionPage() {
           
           p2p.initialize()
         }
-      }, 1000)
+      }, 10240)
     }
   }
 
@@ -344,7 +344,7 @@ export default function SessionPage() {
                     />
                   </div>
                   <p className="text-xs md:text-sm font-bold mt-4 text-gray-600">
-                    Max 100MB per file • Multi-file support • AI Scanned • SHA-256 verified
+                    Max 1GB per file • Multi-file support • AI Scanned • SHA-256 verified
                   </p>
                 </div>
               </CardContent>
@@ -453,15 +453,15 @@ export default function SessionPage() {
                             )}
                             <span className="font-bold text-sm md:text-base truncate">{transfer.name}</span>
                             <span className="text-xs md:text-sm text-gray-600 flex-shrink-0">
-                              ({(transfer.size / 100 / 100).toFixed(1)}MB)
+                              ({(transfer.size / 1024 / 1024).toFixed(1)}MB)
                             </span>
                             {transfer.speed && transfer.speed > 0 && (
                               <span className="text-xs md:text-sm text-blue-600 flex-shrink-0">
-                                {transfer.speed < 100
+                                {transfer.speed < 1024
                                   ? `${transfer.speed.toFixed(0)} B/s`
-                                  : transfer.speed < 100 * 100
-                                    ? `${(transfer.speed / 100).toFixed(1)} KB/s`
-                                    : `${(transfer.speed / 100 / 100).toFixed(1)} MB/s`}
+                                  : transfer.speed < 1024 * 1024
+                                    ? `${(transfer.speed / 1024).toFixed(1)} KB/s`
+                                    : `${(transfer.speed / 1024 / 1024).toFixed(1)} MB/s`}
                               </span>
                             )}
                           </div>

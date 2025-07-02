@@ -112,7 +112,7 @@ export default function Page() {
             <div className="text-xs sm:text-sm font-bold text-black">SUPPORT</div>
           </div>
           <div className="bg-yellow-300 border-2 sm:border-4 border-black p-2 sm:p-4 shadow-[2px_2px_0px_0px_#000000] sm:shadow-[4px_4px_0px_0px_#000000] text-center">
-            <div className="text-lg sm:text-2xl font-black text-black">100%</div>
+            <div className="text-lg sm:text-2xl font-black text-black">1024%</div>
             <div className="text-xs sm:text-sm font-bold text-black">SECURE</div>
           </div>
         </div>
