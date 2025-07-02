@@ -13,8 +13,6 @@ interface UserData {
   isMobile?: boolean
   browser?: string
   isStable?: boolean
-  persistent?: boolean
-  neverExpire?: boolean
 }
 
 interface Session {
@@ -25,12 +23,9 @@ interface Session {
   connectionAttempts?: number
   isStable?: boolean
   qualityScore?: number
-  persistent?: boolean
-  neverExpire?: boolean
-  ultraPersistent?: boolean
 }
 
-class UltraPersistentSignalingServer {
+class RockSolidSignalingServer {
   private wss: WebSocketServer
   private sessions: Map<string, Session> = new Map()
   private userSessions: Map<WebSocket, string> = new Map()
@@ -41,12 +36,11 @@ class UltraPersistentSignalingServer {
     reconnections: 0,
     errors: 0,
     p2pConnections: 0,
-    persistentSessions: 0,
     stabilityScore: 100,
   }
 
   constructor(port = process.env.PORT || 8080) {
-    console.log("🚀 Starting Ultra-Persistent Signaling Server - NEVER DISCONNECT EDITION...")
+    console.log("🚀 Starting Rock-Solid Signaling Server - Fixed Reconnection Edition...")
     console.log(`🌐 Port: ${port}`)
 
     this.server = createServer()
@@ -83,23 +77,20 @@ class UltraPersistentSignalingServer {
         res.writeHead(200, { "Content-Type": "application/json" })
         res.end(
           JSON.stringify({
-            status: "ultra-persistent",
+            status: "rock-solid-fixed",
             timestamp: new Date().toISOString(),
             sessions: this.sessions.size,
             connections: this.userSessions.size,
             uptime: process.uptime(),
-            version: "3.0.0-ultra-persistent",
+            version: "2.1.0-fixed-reconnection",
             stats: this.connectionStats,
-            persistentSessions: Array.from(this.sessions.entries())
-              .filter(([_, session]) => session.ultraPersistent)
-              .map(([id, session]) => ({
-                id,
-                userCount: session.users.size,
-                persistent: session.persistent,
-                neverExpire: session.neverExpire,
-                lastActivity: session.lastActivity,
-                uptime: Date.now() - session.createdAt.getTime(),
-              })),
+            activeSessions: Array.from(this.sessions.entries()).map(([id, session]) => ({
+              id,
+              userCount: session.users.size,
+              isStable: session.isStable,
+              lastActivity: session.lastActivity,
+              uptime: Date.now() - session.createdAt.getTime(),
+            })),
           }),
         )
         return
@@ -109,7 +100,7 @@ class UltraPersistentSignalingServer {
       res.end("Not Found")
     })
 
-    // Ultra-persistent WebSocket server
+    // Rock-solid WebSocket server
     this.wss = new WebSocketServer({
       server: this.server,
       perMessageDeflate: {
@@ -120,7 +111,7 @@ class UltraPersistentSignalingServer {
       clientTracking: true,
       verifyClient: (info) => {
         const origin = info.origin
-        console.log(`🔍 Verifying ultra-persistent client from: ${origin}`)
+        console.log(`🔍 Verifying client from: ${origin}`)
 
         if (!origin) return true
 
@@ -150,15 +141,13 @@ class UltraPersistentSignalingServer {
       this.connectionStats.errors++
     })
 
-    // Ultra-persistent session management - NEVER clean up persistent sessions
-    setInterval(this.ultraPersistentCleanup.bind(this), 60 * 1000) // Every 1 minute
+    // Session management with longer timeouts
+    setInterval(this.cleanup.bind(this), 5 * 60 * 1000) // Every 5 minutes
     setInterval(this.logStats.bind(this), 30 * 1000) // Every 30 seconds
-    setInterval(this.maintainPersistentSessions.bind(this), 10 * 1000) // Every 10 seconds
 
     this.server.listen(port, "0.0.0.0", () => {
-      console.log(`✅ Ultra-Persistent server running on port ${port}`)
+      console.log(`✅ Rock-solid server running on port ${port}`)
       console.log(`🌍 Health check: http://0.0.0.0:${port}/health`)
-      console.log(`🔒 Sessions will NEVER expire once marked persistent`)
       console.log("=".repeat(60))
     })
 
@@ -167,47 +156,20 @@ class UltraPersistentSignalingServer {
   }
 
   private shutdown() {
-    console.log("🛑 Shutting down ultra-persistent server...")
-    console.log("💾 Preserving persistent sessions for reconnection...")
-
+    console.log("🛑 Shutting down rock-solid server...")
     this.wss.clients.forEach((ws) => {
       if (ws.readyState === WebSocket.OPEN) {
         this.send(ws, {
           type: "server-shutdown",
-          message: "Server maintenance - your session is preserved, reconnect in 5 seconds",
+          message: "Server maintenance - reconnect in 5 seconds",
           reconnectDelay: 5000,
-          sessionPreserved: true,
-          ultraPersistent: true,
         })
-        ws.close(1000, "Server maintenance - session preserved")
+        ws.close(1000, "Server maintenance")
       }
     })
-
     this.server.close(() => {
-      console.log("✅ Server shut down gracefully - persistent sessions preserved")
+      console.log("✅ Server shut down gracefully")
       process.exit(0)
-    })
-  }
-
-  private maintainPersistentSessions() {
-    // Keep all persistent sessions alive
-    this.sessions.forEach((session, sessionId) => {
-      if (session.ultraPersistent || session.persistent) {
-        session.lastActivity = new Date() // Keep it fresh
-
-        // Notify connected users that session is being maintained
-        session.users.forEach((userData) => {
-          if (userData.ws.readyState === WebSocket.OPEN) {
-            this.send(userData.ws, {
-              type: "session-maintained",
-              sessionId,
-              timestamp: Date.now(),
-              persistent: true,
-              neverExpire: true,
-            })
-          }
-        })
-      }
     })
   }
 
@@ -219,34 +181,21 @@ class UltraPersistentSignalingServer {
     this.connectionStats.totalConnections++
     this.connectionStats.activeConnections++
 
-    console.log(`🔗 New ultra-persistent ${isMobile ? "mobile" : "desktop"} client: ${clientIP}`)
+    console.log(`🔗 New rock-solid ${isMobile ? "mobile" : "desktop"} client: ${clientIP}`)
 
-    // Send immediate ultra-persistent connection confirmation
+    // Send immediate connection confirmation
     this.send(ws, {
       type: "connected",
-      message: "Ultra-persistent connection established - NEVER DISCONNECT MODE",
+      message: "Rock-solid connection established - fixed reconnection",
       timestamp: new Date().toISOString(),
-      serverVersion: "3.0.0-ultra-persistent",
-      features: [
-        "ultra-persistent-sessions",
-        "never-expire",
-        "auto-reconnect",
-        "session-preservation",
-        "infinite-retry",
-      ],
-      guarantees: {
-        sessionPersistence: "infinite",
-        autoReconnect: "always",
-        dataPreservation: "guaranteed",
-      },
+      serverVersion: "2.1.0-fixed-reconnection",
+      features: ["fixed-p2p-reconnection", "stable-signaling", "large-file-support"],
     })
 
     ws.on("message", (data) => {
       try {
         const message = JSON.parse(data.toString())
-        console.log(
-          `📨 ${message.type} from ${clientIP} ${message.sessionId ? `(${message.sessionId})` : ""} ${message.persistent ? "[PERSISTENT]" : ""}`,
-        )
+        console.log(`📨 ${message.type} from ${clientIP} ${message.sessionId ? `(${message.sessionId})` : ""}`)
         this.handleMessage(ws, message)
       } catch (error) {
         console.error("❌ Message parse error:", error)
@@ -255,35 +204,35 @@ class UltraPersistentSignalingServer {
     })
 
     ws.on("close", (code, reason) => {
-      console.log(`🔌 Ultra-persistent client disconnected: ${code} ${reason} (${clientIP}) - WILL PRESERVE SESSION`)
+      console.log(`🔌 Client disconnected: ${code} ${reason} (${clientIP})`)
       this.connectionStats.activeConnections--
-      this.handleDisconnection(ws, true) // true = preserve session
+      this.handleDisconnection(ws)
     })
 
     ws.on("error", (error) => {
       console.error(`❌ WebSocket error from ${clientIP}:`, error)
       this.connectionStats.errors++
-      this.handleDisconnection(ws, true) // true = preserve session
+      this.handleDisconnection(ws)
     })
 
-    // Ultra-persistent ping/pong - more tolerant
+    // Stable ping/pong with longer intervals
     let missedPings = 0
-    const maxMissedPings = 5 // More tolerance for persistent connections
+    const maxMissedPings = 3
 
     const pingInterval = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
-        ws.ping("ultra-persistent-ping")
+        ws.ping("rock-solid-ping")
         missedPings++
 
         if (missedPings > maxMissedPings) {
-          console.log(`⚠️ Ultra-persistent client ${clientIP} missed ${missedPings} pings - preserving session`)
-          ws.close(1008, "Connection timeout - session preserved")
+          console.log(`⚠️ Client ${clientIP} missed ${missedPings} pings - closing`)
+          ws.close(1008, "Connection timeout")
           clearInterval(pingInterval)
         }
       } else {
         clearInterval(pingInterval)
       }
-    }, 25000) // 25 second ping interval - longer for stability
+    }, 20000) // 20 second ping interval
 
     ws.on("pong", () => {
       missedPings = 0
@@ -296,7 +245,6 @@ class UltraPersistentSignalingServer {
             userData.lastPing = Date.now()
             userData.missedPings = 0
             userData.isStable = true
-            session.lastActivity = new Date()
           }
         }
       }
@@ -318,19 +266,10 @@ class UltraPersistentSignalingServer {
 
     switch (type) {
       case "join":
-        this.handleJoin(ws, sessionId, userId, message.clientInfo, message.persistent, message.neverExpire)
+        this.handleJoin(ws, sessionId, userId, message.clientInfo, message.reconnect)
         break
       case "ping":
-        this.handlePing(ws, sessionId, userId, message.persistent)
-        break
-      case "session-keep-alive":
-        this.handleSessionKeepAlive(ws, sessionId, userId, message.persistent, message.neverExpire)
-        break
-      case "maintain-session":
-        this.handleMaintainSession(ws, sessionId, userId, message.forceKeepAlive, message.neverExpire)
-        break
-      case "force-p2p-restart":
-        this.handleForceP2PRestart(ws, sessionId, userId, message.reason)
+        this.handlePing(ws, sessionId, userId)
         break
       case "offer":
       case "answer":
@@ -342,24 +281,14 @@ class UltraPersistentSignalingServer {
     }
   }
 
-  private handleJoin(
-    ws: WebSocket,
-    sessionId: string,
-    userId: string,
-    clientInfo: any = {},
-    persistent = false,
-    neverExpire = false,
-  ) {
+  private handleJoin(ws: WebSocket, sessionId: string, userId: string, clientInfo: any = {}, isReconnect = false) {
     if (!sessionId || !userId) {
       this.sendError(ws, "Session ID and User ID are required")
       return
     }
 
-    console.log(`👤 User ${userId} joining ultra-persistent session ${sessionId}`)
+    console.log(`👤 User ${userId} ${isReconnect ? "reconnecting to" : "joining"} session ${sessionId}`)
     console.log(`   Client: ${clientInfo.isMobile ? "Mobile" : "Desktop"}, ${clientInfo.browser || "Unknown"}`)
-    console.log(
-      `   Persistent: ${persistent}, Never Expire: ${neverExpire}, Ultra-Persistent: ${clientInfo.ultraPersistent}`,
-    )
 
     let session = this.sessions.get(sessionId)
     if (!session) {
@@ -371,38 +300,18 @@ class UltraPersistentSignalingServer {
         connectionAttempts: 0,
         isStable: false,
         qualityScore: 100,
-        persistent: persistent || neverExpire,
-        neverExpire: neverExpire,
-        ultraPersistent: clientInfo.ultraPersistent || persistent || neverExpire,
       }
       this.sessions.set(sessionId, session)
-
-      if (session.ultraPersistent) {
-        this.connectionStats.persistentSessions++
-      }
-
-      console.log(
-        `🆕 Created ultra-persistent session: ${sessionId} (Persistent: ${session.persistent}, Never Expire: ${session.neverExpire})`,
-      )
-    } else {
-      // Update session persistence settings
-      if (persistent || neverExpire || clientInfo.ultraPersistent) {
-        session.persistent = true
-        session.neverExpire = neverExpire
-        session.ultraPersistent = true
-        console.log(`🔒 Session ${sessionId} upgraded to ultra-persistent`)
-      }
+      console.log(`🆕 Created rock-solid session: ${sessionId}`)
     }
 
-    // Handle reconnection with session preservation
+    // Handle reconnection
     const existingUser = session.users.get(userId)
     if (existingUser) {
-      console.log(`🔄 User ${userId} reconnecting to ultra-persistent session - PRESERVING ALL STATE`)
+      console.log(`🔄 User ${userId} reconnecting - preserving role and state`)
       existingUser.ws = ws
       existingUser.lastSeen = new Date()
       existingUser.isStable = true
-      existingUser.persistent = persistent || neverExpire
-      existingUser.neverExpire = neverExpire
       this.userSessions.set(ws, sessionId)
       session.lastActivity = new Date()
       this.connectionStats.reconnections++
@@ -415,9 +324,6 @@ class UltraPersistentSignalingServer {
         isInitiator: existingUser.isInitiator,
         reconnected: true,
         sessionState: "preserved",
-        persistent: session.persistent,
-        neverExpire: session.neverExpire,
-        ultraPersistent: session.ultraPersistent,
         sessionUptime: Date.now() - session.createdAt.getTime(),
       })
 
@@ -428,7 +334,6 @@ class UltraPersistentSignalingServer {
           userId,
           userCount: session.users.size,
           reconnected: true,
-          persistent: session.persistent,
           sessionPreserved: true,
         },
         ws,
@@ -458,8 +363,6 @@ class UltraPersistentSignalingServer {
       isMobile: clientInfo?.isMobile || false,
       browser: clientInfo?.browser || "Unknown",
       isStable: true,
-      persistent: persistent || neverExpire,
-      neverExpire: neverExpire,
     }
 
     session.users.set(userId, userData)
@@ -467,7 +370,7 @@ class UltraPersistentSignalingServer {
     session.lastActivity = new Date()
 
     console.log(
-      `✅ User ${userId} joined ultra-persistent session ${sessionId} (${session.users.size}/2) ${isInitiator ? "[INITIATOR]" : "[RECEIVER]"}`,
+      `✅ User ${userId} joined rock-solid session ${sessionId} (${session.users.size}/2) ${isInitiator ? "[INITIATOR]" : "[RECEIVER]"}`,
     )
 
     this.send(ws, {
@@ -477,17 +380,12 @@ class UltraPersistentSignalingServer {
       userId,
       isInitiator,
       sessionCreated: session.createdAt.toISOString(),
-      persistent: session.persistent,
-      neverExpire: session.neverExpire,
-      ultraPersistent: session.ultraPersistent,
       serverCapabilities: {
         maxFileSize: "100MB",
-        chunkSize: "64KB",
+        chunkSize: "32KB",
         resumableTransfers: true,
-        ultraPersistentSessions: true,
-        neverDisconnect: true,
-        infiniteRetry: true,
-        sessionPreservation: true,
+        fixedReconnection: true,
+        largeFileSupport: true,
       },
     })
 
@@ -498,15 +396,13 @@ class UltraPersistentSignalingServer {
         userId,
         userCount: session.users.size,
         readyForP2P: session.users.size === 2,
-        persistent: session.persistent,
-        ultraPersistent: session.ultraPersistent,
       },
       ws,
     )
 
     // Enhanced P2P initiation for 2 users
     if (session.users.size === 2) {
-      console.log(`🚀 Ultra-persistent session ${sessionId} ready - enhanced P2P initiation`)
+      console.log(`🚀 Rock-solid session ${sessionId} ready - P2P initiation`)
       session.isStable = true
       this.connectionStats.p2pConnections++
 
@@ -514,16 +410,15 @@ class UltraPersistentSignalingServer {
       setTimeout(() => {
         this.broadcastToSession(sessionId, {
           type: "p2p-ready",
-          message: "Both users connected - ultra-persistent P2P can be initiated",
+          message: "Both users connected - P2P can be initiated",
           timestamp: Date.now(),
-          ultraPersistent: true,
-          sessionPreserved: true,
+          rockSolid: true,
         })
-      }, 1000) // 1 second delay for stability
+      }, 1500) // 1.5 second delay for stability
     }
   }
 
-  private handlePing(ws: WebSocket, sessionId: string, userId: string, persistent = false) {
+  private handlePing(ws: WebSocket, sessionId: string, userId: string) {
     const session = this.sessions.get(sessionId)
     if (session && userId) {
       const user = session.users.get(userId)
@@ -533,11 +428,6 @@ class UltraPersistentSignalingServer {
         user.missedPings = 0
         user.isStable = true
         session.lastActivity = new Date()
-
-        if (persistent) {
-          user.persistent = true
-          session.persistent = true
-        }
       }
     }
 
@@ -546,102 +436,7 @@ class UltraPersistentSignalingServer {
       timestamp: Date.now(),
       serverTime: new Date().toISOString(),
       quality: "excellent",
-      persistent: persistent,
-      ultraPersistent: session?.ultraPersistent || false,
-    })
-  }
-
-  private handleSessionKeepAlive(
-    ws: WebSocket,
-    sessionId: string,
-    userId: string,
-    persistent = false,
-    neverExpire = false,
-  ) {
-    const session = this.sessions.get(sessionId)
-    if (session && userId) {
-      const user = session.users.get(userId)
-      if (user) {
-        user.lastSeen = new Date()
-        user.isStable = true
-        session.lastActivity = new Date()
-
-        if (persistent || neverExpire) {
-          user.persistent = true
-          user.neverExpire = neverExpire
-          session.persistent = true
-          session.neverExpire = neverExpire
-          session.ultraPersistent = true
-          console.log(`💓 Session ${sessionId} keep-alive - NEVER EXPIRE MODE`)
-        }
-      }
-    }
-
-    this.send(ws, {
-      type: "session-keep-alive-ack",
-      timestamp: Date.now(),
-      status: "maintained",
-      persistent: persistent,
-      neverExpire: neverExpire,
-      sessionPreserved: true,
-    })
-  }
-
-  private handleMaintainSession(
-    ws: WebSocket,
-    sessionId: string,
-    userId: string,
-    forceKeepAlive = false,
-    neverExpire = false,
-  ) {
-    const session = this.sessions.get(sessionId)
-    if (session && userId) {
-      const user = session.users.get(userId)
-      if (user) {
-        user.lastSeen = new Date()
-        user.isStable = true
-        session.lastActivity = new Date()
-
-        if (forceKeepAlive || neverExpire) {
-          session.persistent = true
-          session.neverExpire = true
-          session.ultraPersistent = true
-          user.persistent = true
-          user.neverExpire = true
-          console.log(`🔒 Session ${sessionId} forced to NEVER EXPIRE`)
-        }
-      }
-    }
-
-    this.send(ws, {
-      type: "session-maintained",
-      timestamp: Date.now(),
-      status: "ultra-persistent",
-      forceKeepAlive: forceKeepAlive,
-      neverExpire: neverExpire,
-      guaranteed: true,
-    })
-  }
-
-  private handleForceP2PRestart(ws: WebSocket, sessionId: string, userId: string, reason: string) {
-    console.log(`🔄 Force P2P restart requested by ${userId} in session ${sessionId} - Reason: ${reason}`)
-
-    const session = this.sessions.get(sessionId)
-    if (!session) {
-      this.sendError(ws, "Session not found")
-      return
-    }
-
-    session.lastActivity = new Date()
-
-    // Broadcast P2P restart to all users in session
-    this.broadcastToSession(sessionId, {
-      type: "force-p2p-restart",
-      userId,
-      reason,
-      timestamp: Date.now(),
-      ultraPersistent: true,
-      sessionPreserved: true,
+      rockSolid: true,
     })
   }
 
@@ -674,15 +469,14 @@ class UltraPersistentSignalingServer {
       senderId: userId,
       timestamp: Date.now(),
       serverProcessed: new Date().toISOString(),
-      ultraPersistent: session.ultraPersistent,
-      sessionPreserved: true,
+      rockSolid: true,
     }
 
-    console.log(`🔄 Ultra-persistent relay ${message.type} from ${userId}`)
+    console.log(`🔄 Rock-solid relay ${message.type} from ${userId}`)
     this.broadcastToSession(sessionId, relayMessage, ws)
   }
 
-  private handleDisconnection(ws: WebSocket, preserveSession = true) {
+  private handleDisconnection(ws: WebSocket) {
     const sessionId = this.userSessions.get(ws)
     if (!sessionId) return
 
@@ -702,11 +496,8 @@ class UltraPersistentSignalingServer {
 
     if (disconnectedUserId) {
       this.userSessions.delete(ws)
-      console.log(
-        `👋 User ${disconnectedUserId} disconnected from ultra-persistent session ${sessionId} - SESSION PRESERVED`,
-      )
+      console.log(`👋 User ${disconnectedUserId} disconnected from session ${sessionId} - preserving for reconnection`)
 
-      // Always broadcast as temporary for ultra-persistent sessions
       this.broadcastToSession(sessionId, {
         type: "user-left",
         userId: disconnectedUserId,
@@ -715,22 +506,18 @@ class UltraPersistentSignalingServer {
         timestamp: Date.now(),
         autoReconnect: true,
         sessionPreserved: true,
-        ultraPersistent: session.ultraPersistent,
-        waitingForReconnection: true,
       })
 
-      // Ultra-persistent cleanup - much longer grace period or never clean up
-      const cleanupDelay = session.ultraPersistent || session.neverExpire ? 24 * 60 * 60 * 1000 : 5 * 60 * 1000 // 24 hours vs 5 minutes
-
-      setTimeout(() => {
-        const currentSession = this.sessions.get(sessionId)
-        if (currentSession && !currentSession.neverExpire) {
-          const user = currentSession.users.get(disconnectedUserId!)
-          if (user && Date.now() - user.lastSeen.getTime() > cleanupDelay) {
-            // Only clean up if not marked as never expire
-            if (!user.neverExpire && !currentSession.neverExpire) {
+      // Extended cleanup with longer grace period for reconnection
+      setTimeout(
+        () => {
+          const currentSession = this.sessions.get(sessionId)
+          if (currentSession) {
+            const user = currentSession.users.get(disconnectedUserId!)
+            if (user && Date.now() - user.lastSeen.getTime() > 10 * 60 * 1000) {
+              // 10 minutes grace period
               currentSession.users.delete(disconnectedUserId!)
-              console.log(`🗑️ Removed user ${disconnectedUserId} after grace period`)
+              console.log(`🗑️ Removed user ${disconnectedUserId} after extended grace period`)
 
               this.broadcastToSession(sessionId, {
                 type: "user-left",
@@ -740,21 +527,15 @@ class UltraPersistentSignalingServer {
                 timestamp: Date.now(),
               })
 
-              // Only remove session if not ultra-persistent
-              if (currentSession.users.size === 0 && !currentSession.ultraPersistent) {
+              if (currentSession.users.size === 0) {
                 this.sessions.delete(sessionId)
-                console.log(`🗑️ Removed non-persistent session: ${sessionId}`)
+                console.log(`🗑️ Removed empty session: ${sessionId}`)
               }
-            } else {
-              console.log(`🔒 User ${disconnectedUserId} preserved in never-expire session ${sessionId}`)
             }
           }
-        } else if (currentSession?.neverExpire) {
-          console.log(
-            `🔒 Session ${sessionId} marked as NEVER EXPIRE - user ${disconnectedUserId} preserved indefinitely`,
-          )
-        }
-      }, cleanupDelay)
+        },
+        10 * 60 * 1000,
+      ) // 10 minutes
     }
   }
 
@@ -775,7 +556,7 @@ class UltraPersistentSignalingServer {
     })
 
     if (sentCount > 0) {
-      console.log(`📡 Ultra-persistent broadcast ${message.type} to ${sentCount} users`)
+      console.log(`📡 Rock-solid broadcast ${message.type} to ${sentCount} users`)
     }
   }
 
@@ -796,48 +577,39 @@ class UltraPersistentSignalingServer {
       message,
       timestamp: Date.now(),
       recoverable: true,
-      ultraPersistent: true,
-      sessionPreserved: true,
+      rockSolid: true,
     })
   }
 
-  private ultraPersistentCleanup() {
+  private cleanup() {
     const now = new Date()
     const expiredSessions: string[] = []
 
     this.sessions.forEach((session, sessionId) => {
-      // NEVER clean up ultra-persistent or never-expire sessions
-      if (session.ultraPersistent || session.neverExpire) {
-        console.log(
-          `🔒 Preserving ultra-persistent session ${sessionId} (uptime: ${Math.round((now.getTime() - session.createdAt.getTime()) / 1000 / 60)} minutes)`,
-        )
-        return
-      }
-
       const inactiveTime = now.getTime() - session.lastActivity.getTime()
 
-      // Only clean up non-persistent sessions after 6 hours
-      const timeoutDuration = 6 * 60 * 60 * 1000 // 6 hours
+      // Extended timeout for better stability - 2 hours
+      const timeoutDuration = 2 * 60 * 60 * 1000
 
       if (inactiveTime > timeoutDuration) {
         expiredSessions.push(sessionId)
       } else {
-        // Clean inactive users from non-persistent sessions only
+        // Clean inactive users with extended grace period
         const inactiveUsers: string[] = []
         session.users.forEach((userData, userId) => {
           const userInactiveTime = now.getTime() - userData.lastSeen.getTime()
-          if (userInactiveTime > 2 * 60 * 60 * 1000 && !userData.persistent && !userData.neverExpire) {
-            // 2 hours for non-persistent users
+          if (userInactiveTime > 30 * 60 * 1000) {
+            // 30 minutes for users
             inactiveUsers.push(userId)
           }
         })
 
         inactiveUsers.forEach((userId) => {
           session.users.delete(userId)
-          console.log(`🧹 Cleaned non-persistent user ${userId}`)
+          console.log(`🧹 Cleaned inactive user ${userId}`)
         })
 
-        if (session.users.size === 0 && !session.ultraPersistent) {
+        if (session.users.size === 0) {
           expiredSessions.push(sessionId)
         }
       }
@@ -845,17 +617,17 @@ class UltraPersistentSignalingServer {
 
     expiredSessions.forEach((sessionId) => {
       const session = this.sessions.get(sessionId)
-      if (session && !session.ultraPersistent && !session.neverExpire) {
+      if (session) {
         session.users.forEach((userData) => {
           this.send(userData.ws, {
             type: "session-expired",
-            message: "Non-persistent session expired - create a new session",
+            message: "Session expired due to inactivity",
             reconnectDelay: 3000,
           })
           userData.ws.close(1000, "Session expired")
         })
         this.sessions.delete(sessionId)
-        console.log(`⏰ Expired non-persistent session: ${sessionId}`)
+        console.log(`⏰ Expired session: ${sessionId}`)
       }
     })
   }
@@ -863,17 +635,17 @@ class UltraPersistentSignalingServer {
   private logStats() {
     if (this.sessions.size > 0 || this.connectionStats.activeConnections > 0) {
       console.log(
-        `📊 Ultra-Persistent Stats: ${this.sessions.size} sessions (${this.connectionStats.persistentSessions} persistent), ${this.connectionStats.activeConnections} connections`,
+        `📊 Rock-Solid Stats: ${this.sessions.size} sessions, ${this.connectionStats.activeConnections} connections`,
       )
       console.log(
         `   Total: ${this.connectionStats.totalConnections}, P2P: ${this.connectionStats.p2pConnections}, Reconnects: ${this.connectionStats.reconnections}`,
       )
 
-      // Log persistent sessions
-      const persistentSessions = Array.from(this.sessions.entries()).filter(([_, session]) => session.ultraPersistent)
-      if (persistentSessions.length > 0) {
+      // Log active sessions
+      const activeSessions = Array.from(this.sessions.entries()).filter(([_, session]) => session.users.size > 0)
+      if (activeSessions.length > 0) {
         console.log(
-          `🔒 Ultra-Persistent Sessions: ${persistentSessions
+          `🔗 Active Sessions: ${activeSessions
             .map(
               ([id, session]) =>
                 `${id}(${session.users.size}/2, ${Math.round((Date.now() - session.createdAt.getTime()) / 1000 / 60)}min)`,
@@ -885,6 +657,6 @@ class UltraPersistentSignalingServer {
   }
 }
 
-// Start ultra-persistent server
+// Start rock-solid server
 const port = process.env.PORT || 8080
-new UltraPersistentSignalingServer(Number(port))
+new RockSolidSignalingServer(Number(port))
