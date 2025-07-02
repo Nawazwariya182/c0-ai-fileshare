@@ -269,7 +269,6 @@ export default function SessionPage() {
 
             <div className="flex items-center gap-1 md:gap-2 px-2 md:px-4 py-1 md:py-2 border-2 md:border-4 border-black font-black bg-purple-400 text-xs md:text-sm">
               {isMobile ? <Smartphone className="w-3 h-3" /> : <Monitor className="w-3 h-3" />}
-              {getSpeedDisplay()}
             </div>
           </div>
         </header>
@@ -412,7 +411,7 @@ export default function SessionPage() {
                         <p className="font-black text-base md:text-lg text-green-800">BULLETPROOF CONNECTION!</p>
                         <p className="font-bold text-sm md:text-base">Maximum stability • Zero packet loss</p>
                         <p className="text-xs md:text-sm mt-2">
-                          Quality: {connectionQuality} • Speed: {getSpeedDisplay()}
+                          Quality: {connectionQuality}
                         </p>
                       </div>
                     )}
@@ -424,7 +423,7 @@ export default function SessionPage() {
                         <p className="font-bold mb-4 text-sm md:text-base">Auto-reconnecting...</p>
                         <Button
                           onClick={handleReconnect}
-                          className="neubrutalism-button bg-red-500 text-white touch-target"
+                          className="neubrutalism-button bg-red-500 text-white hover:white hover:text-red-500 touch-target"
                         >
                           <RefreshCw className="w-4 h-4 mr-2" />
                           FORCE RECONNECT
