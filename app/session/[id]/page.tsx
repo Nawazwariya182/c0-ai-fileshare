@@ -20,11 +20,15 @@ import {
   Shield,
   Smartphone,
   Monitor,
+  Pause,
+  Play,
+  Square,
+  Activity,
 } from "lucide-react"
 
 import { FilePreviewModal } from "@/components/file-preview-modal"
 import { ChatPanel } from "@/components/chat-panel"
-import { BulletproofP2P } from "@/lib/bulletproof-p2p"
+import { EnterpriseP2P } from "@/lib/enterprise-p2p"
 
 interface FileTransfer {
   id: string
@@ -32,9 +36,10 @@ interface FileTransfer {
   size: number
   type: string
   progress: number
-  status: "pending" | "transferring" | "completed" | "error"
+  status: "pending" | "scanning" | "transferring" | "completed" | "error" | "paused" | "resuming"
   direction: "sending" | "receiving"
   speed?: number
+  lastActivity?: number
 }
 
 interface ChatMessage {
@@ -51,8 +56,8 @@ export default function SessionPage() {
   const router = useRouter()
   const sessionId = params.id as string
 
-  // Simple connection states
-  const [connectionStatus, setConnectionStatus] = useState<"connecting" | "connected" | "disconnected">("connecting")
+  // Enterprise connection states
+  const [connectionState, setConnectionState] = useState<"connecting" | "connected" | "disconnected">("connecting")
   const [wsStatus, setWsStatus] = useState<"connecting" | "connected" | "disconnected">("connecting")
   const [fileTransfers, setFileTransfers] = useState<FileTransfer[]>([])
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
@@ -60,30 +65,48 @@ export default function SessionPage() {
   const [userCount, setUserCount] = useState(0)
   const [isMobile, setIsMobile] = useState(false)
 
+  // Enterprise performance metrics
+  const [currentSpeed, setCurrentSpeed] = useState(0)
+  const [connectionQuality, setConnectionQuality] = useState<"excellent" | "good" | "poor">("excellent")
+  const [connectionStats, setConnectionStats] = useState({
+    latency: 0,
+    throughput: 0,
+    stability: 100,
+  })
+  const [activeTransfers, setActiveTransfers] = useState(0)
+  const [transferQueue, setTransferQueue] = useState(0)
+
   // File handling states
   const [dragOver, setDragOver] = useState(false)
   const [previewFiles, setPreviewFiles] = useState<File[]>([])
   const [showPreview, setShowPreview] = useState(false)
-  const [currentSpeed, setCurrentSpeed] = useState(0)
-  const [connectionQuality, setConnectionQuality] = useState<"excellent" | "good" | "poor">("excellent")
 
-  // Simple refs
+  // Enterprise refs
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const p2pRef = useRef<BulletproofP2P | null>(null)
+  const p2pRef = useRef<EnterpriseP2P | null>(null)
 
-  // Initialize bulletproof P2P
+  // Initialize enterprise P2P
   useEffect(() => {
     if (!user || !sessionId) return
 
-    console.log("🚀 Initializing Bulletproof P2P System")
+    console.log("🚀 Initializing Enterprise P2P System")
 
-    const p2p = new BulletproofP2P(sessionId, user.id)
+    const p2p = new EnterpriseP2P(sessionId, user.id, {
+      mobileOptimizations: true,
+      maxReconnectAttempts: 50,
+      reconnectDelay: 1000,
+      heartbeatInterval: 5000,
+      connectionTimeout: 15000,
+      chunkSize: 64 * 1024,
+      maxConcurrentChunks: 16,
+      bufferThreshold: 2 * 1024 * 1024,
+    })
     p2pRef.current = p2p
 
-    // Set up event handlers
+    // Set up enterprise event handlers
     p2p.onConnectionStatusChange = (status) => {
       console.log(`🔗 Connection status: ${status}`)
-      setConnectionStatus(status)
+      setConnectionState(status)
       if (status === "connected") {
         setError("")
       }
@@ -102,7 +125,7 @@ export default function SessionPage() {
     }
 
     p2p.onError = (errorMsg) => {
-      console.error("❌ P2P Error:", errorMsg)
+      console.error("❌ Enterprise P2P Error:", errorMsg)
       setError(errorMsg)
     }
 
@@ -123,14 +146,30 @@ export default function SessionPage() {
     }
 
     p2p.onConnectionRecovery = () => {
-      console.log("✅ Connection recovered")
+      console.log("✅ Enterprise connection recovered")
       setError("")
     }
 
-    // Initialize connection
+    p2p.onTransferProgress = (fileId, progress, speed) => {
+      // Real-time transfer progress updates
+      setCurrentSpeed(speed)
+    }
+
+    // Initialize enterprise connection
     p2p.initialize()
 
+    // Monitor enterprise stats
+    const statsInterval = setInterval(() => {
+      if (p2p) {
+        const stats = p2p.getConnectionStats()
+        setConnectionStats(stats)
+        setActiveTransfers(p2p.getActiveTransfers())
+        setTransferQueue(p2p.getTransferQueue())
+      }
+    }, 1000)
+
     return () => {
+      clearInterval(statsInterval)
       p2p.destroy()
     }
   }, [user, sessionId])
@@ -183,25 +222,25 @@ export default function SessionPage() {
 
   const handleReconnect = () => {
     if (p2pRef.current) {
-      p2pRef.current.destroy()
-      setTimeout(() => {
-        if (user && sessionId) {
-          const p2p = new BulletproofP2P(sessionId, user.id)
-          p2pRef.current = p2p
+      p2pRef.current.forceReconnect()
+    }
+  }
 
-          // Reattach handlers
-          p2p.onConnectionStatusChange = (status) => setConnectionStatus(status)
-          p2p.onSignalingStatusChange = (status) => setWsStatus(status)
-          p2p.onUserCountChange = (count) => setUserCount(count)
-          p2p.onError = (errorMsg) => setError(errorMsg)
-          p2p.onConnectionQualityChange = (quality) => setConnectionQuality(quality)
-          p2p.onSpeedUpdate = (speed) => setCurrentSpeed(speed)
-          p2p.onFileTransferUpdate = (transfers) => setFileTransfers(transfers)
-          p2p.onChatMessage = (message) => setChatMessages((prev) => [...prev, message])
+  const handlePauseTransfer = (fileId: string) => {
+    if (p2pRef.current) {
+      p2pRef.current.pauseFileTransfer(fileId)
+    }
+  }
 
-          p2p.initialize()
-        }
-      }, 1000)
+  const handleResumeTransfer = (fileId: string) => {
+    if (p2pRef.current) {
+      p2pRef.current.resumeFileTransfer(fileId)
+    }
+  }
+
+  const handleCancelTransfer = (fileId: string) => {
+    if (p2pRef.current) {
+      p2pRef.current.cancelFileTransfer(fileId)
     }
   }
 
@@ -230,11 +269,28 @@ export default function SessionPage() {
     return `${(currentSpeed / 1024 / 1024).toFixed(1)} MB/s`
   }
 
+  const getTransferStatusColor = (status: string) => {
+    switch (status) {
+      case "completed":
+        return "bg-green-300"
+      case "transferring":
+        return "bg-blue-300"
+      case "paused":
+        return "bg-yellow-300"
+      case "error":
+        return "bg-red-300"
+      case "resuming":
+        return "bg-orange-300"
+      default:
+        return "bg-gray-300"
+    }
+  }
+
   return (
     <div className="min-h-screen bg-purple-300 p-2 md:p-4">
       <div className="max-w-7xl mx-auto">
         <header className="text-center mb-4 md:mb-6">
-          <h1 className="text-2xl md:text-4xl font-black text-black mb-2">SESSION: {sessionId}</h1>
+          <h1 className="text-2xl md:text-4xl font-black text-black mb-2">ENTERPRISE SESSION: {sessionId}</h1>
           <div className="flex items-center justify-center gap-2 md:gap-4 flex-wrap">
             <div
               className={`flex items-center gap-1 md:gap-2 px-2 md:px-4 py-1 md:py-2 border-2 md:border-4 border-black font-black text-xs md:text-sm ${
@@ -253,19 +309,19 @@ export default function SessionPage() {
 
             <div
               className={`flex items-center gap-1 md:gap-2 px-2 md:px-4 py-1 md:py-2 border-2 md:border-4 border-black font-black text-xs md:text-sm ${
-                connectionStatus === "connected"
+                connectionState === "connected"
                   ? "bg-green-400"
-                  : connectionStatus === "connecting"
+                  : connectionState === "connecting"
                     ? "bg-yellow-400"
                     : "bg-red-400"
               }`}
             >
-              {connectionStatus === "connected" ? (
+              {connectionState === "connected" ? (
                 <Users className="w-3 md:w-5 h-3 md:h-5" />
               ) : (
                 <WifiOff className="w-3 md:w-5 h-3 md:h-5" />
               )}
-              P2P: {connectionStatus.toUpperCase()}
+              P2P: {connectionState.toUpperCase()}
             </div>
 
             <div className="flex items-center gap-1 md:gap-2 px-2 md:px-4 py-1 md:py-2 border-2 md:border-4 border-black font-black bg-blue-400 text-xs md:text-sm">
@@ -283,6 +339,24 @@ export default function SessionPage() {
             <div className="flex items-center gap-1 md:gap-2 px-2 md:px-4 py-1 md:py-2 border-2 md:border-4 border-black font-black bg-purple-400 text-xs md:text-sm">
               {isMobile ? <Smartphone className="w-3 h-3" /> : <Monitor className="w-3 h-3" />}
               {getSpeedDisplay()}
+            </div>
+
+            <div className="flex items-center gap-1 md:gap-2 px-2 md:px-4 py-1 md:py-2 border-2 md:border-4 border-black font-black bg-indigo-400 text-white text-xs md:text-sm">
+              <Activity className="w-3 md:w-5 h-3 md:h-5" />
+              {activeTransfers}T/{transferQueue}Q
+            </div>
+          </div>
+
+          {/* Enterprise Performance Stats */}
+          <div className="flex items-center justify-center gap-2 md:gap-4 flex-wrap mt-2">
+            <div className="px-2 py-1 bg-black text-white text-xs font-bold rounded">
+              LATENCY: {connectionStats.latency.toFixed(0)}ms
+            </div>
+            <div className="px-2 py-1 bg-black text-white text-xs font-bold rounded">
+              STABILITY: {connectionStats.stability.toFixed(0)}%
+            </div>
+            <div className="px-2 py-1 bg-black text-white text-xs font-bold rounded">
+              THROUGHPUT: {(connectionStats.throughput / 1024 / 1024).toFixed(1)}MB/s
             </div>
           </div>
         </header>
@@ -308,20 +382,20 @@ export default function SessionPage() {
         )}
 
         <div className="space-y-4 md:space-y-6">
-          {/* File Drop Zone */}
+          {/* Enterprise File Drop Zone */}
           <div className="w-full">
             <Card className="neubrutalism-card bg-yellow-300">
               <CardHeader className="pb-3 md:pb-6">
                 <CardTitle className="text-lg md:text-2xl font-black flex items-center gap-2">
                   <Upload className="w-5 md:w-6 h-5 md:h-6" />
-                  SEND FILES
+                  ENTERPRISE FILE TRANSFER
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <div
                   className={`border-4 border-dashed border-black p-4 md:p-8 text-center transition-colors ${
                     dragOver ? "bg-green-200" : "bg-white"
-                  } ${connectionStatus !== "connected" ? "opacity-50" : ""}`}
+                  } ${connectionState !== "connected" ? "opacity-50" : ""}`}
                   onDrop={handleDrop}
                   onDragOver={(e) => {
                     e.preventDefault()
@@ -329,18 +403,18 @@ export default function SessionPage() {
                   }}
                   onDragLeave={() => setDragOver(false)}
                   onClick={() => {
-                    if (isMobile && connectionStatus === "connected") {
+                    if (isMobile && connectionState === "connected") {
                       fileInputRef.current?.click()
                     }
                   }}
                 >
                   <Upload className="w-12 md:w-16 h-12 md:h-16 mx-auto mb-4" />
                   <p className="text-lg md:text-xl font-black mb-2">
-                    {connectionStatus === "connected"
+                    {connectionState === "connected"
                       ? isMobile
                         ? "TAP HERE TO SELECT FILES"
                         : "DROP FILES HERE"
-                      : "ESTABLISHING CONNECTION..."}
+                      : "ESTABLISHING ENTERPRISE CONNECTION..."}
                   </p>
                   {!isMobile && <p className="font-bold mb-4">or</p>}
                   <div className="relative">
@@ -349,7 +423,7 @@ export default function SessionPage() {
                         e.stopPropagation()
                         fileInputRef.current?.click()
                       }}
-                      disabled={connectionStatus !== "connected"}
+                      disabled={connectionState !== "connected"}
                       className="neubrutalism-button bg-blue-500 text-white hover:bg-white hover:text-blue-500 touch-target"
                     >
                       CHOOSE FILES
@@ -364,7 +438,7 @@ export default function SessionPage() {
                     />
                   </div>
                   <p className="text-xs md:text-sm font-bold mt-4 text-gray-600">
-                    Max 1GB per file • Multi-file support • Bulletproof transfer
+                    Max 10GB per file • Multi-file support • Enterprise-grade transfer • Resumable transfers
                   </p>
                 </div>
               </CardContent>
@@ -376,7 +450,7 @@ export default function SessionPage() {
             <div className="lg:col-span-2">
               <Card className="neubrutalism-card bg-indigo-300 h-full">
                 <ChatPanel
-                  isConnected={connectionStatus === "connected"}
+                  isConnected={connectionState === "connected"}
                   currentUser={user?.firstName || "You"}
                   onSendMessage={handleSendChatMessage}
                   messages={chatMessages}
@@ -389,7 +463,7 @@ export default function SessionPage() {
                 <CardHeader className="pb-3 md:pb-6">
                   <CardTitle className="text-lg md:text-2xl font-black flex items-center gap-2">
                     <Users className="w-5 md:w-6 h-5 md:h-6" />
-                    CONNECTION STATUS
+                    ENTERPRISE STATUS
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -397,7 +471,7 @@ export default function SessionPage() {
                     {wsStatus === "connecting" && (
                       <div className="bg-yellow-200 p-4 md:p-6 border-4 border-black">
                         <div className="animate-spin w-6 md:w-8 h-6 md:h-8 border-4 border-black border-t-transparent rounded-full mx-auto mb-4"></div>
-                        <p className="font-black text-base md:text-lg">CONNECTING TO SERVER...</p>
+                        <p className="font-black text-base md:text-lg">CONNECTING TO ENTERPRISE SERVER...</p>
                         <p className="font-bold text-sm md:text-base">Establishing bulletproof connection</p>
                       </div>
                     )}
@@ -411,26 +485,29 @@ export default function SessionPage() {
                       </div>
                     )}
 
-                    {wsStatus === "connected" && userCount === 2 && connectionStatus === "connecting" && (
+                    {wsStatus === "connected" && userCount === 2 && connectionState === "connecting" && (
                       <div className="bg-orange-200 p-4 md:p-6 border-4 border-black">
                         <div className="animate-spin w-6 md:w-8 h-6 md:h-8 border-4 border-black border-t-transparent rounded-full mx-auto mb-4"></div>
-                        <p className="font-black text-base md:text-lg">ESTABLISHING P2P...</p>
-                        <p className="font-bold text-sm md:text-base">Bulletproof connection setup</p>
+                        <p className="font-black text-base md:text-lg">ESTABLISHING ENTERPRISE P2P...</p>
+                        <p className="font-bold text-sm md:text-base">Ultra-reliable connection setup</p>
                       </div>
                     )}
 
-                    {connectionStatus === "connected" && (
+                    {connectionState === "connected" && (
                       <div className="bg-green-200 p-4 md:p-6 border-4 border-black">
                         <CheckCircle className="w-10 md:w-12 h-10 md:h-12 mx-auto mb-4 text-green-600" />
-                        <p className="font-black text-base md:text-lg text-green-800">BULLETPROOF CONNECTION!</p>
+                        <p className="font-black text-base md:text-lg text-green-800">ENTERPRISE CONNECTION!</p>
                         <p className="font-bold text-sm md:text-base">Maximum stability • Zero packet loss</p>
                         <p className="text-xs md:text-sm mt-2">
                           Quality: {connectionQuality} • Speed: {getSpeedDisplay()}
                         </p>
+                        <p className="text-xs md:text-sm">
+                          Active: {activeTransfers} • Queue: {transferQueue}
+                        </p>
                       </div>
                     )}
 
-                    {(wsStatus === "disconnected" || connectionStatus === "disconnected") && (
+                    {(wsStatus === "disconnected" || connectionState === "disconnected") && (
                       <div className="bg-red-200 p-4 md:p-6 border-4 border-black">
                         <WifiOff className="w-10 md:w-12 h-10 md:h-12 mx-auto mb-4 text-red-600" />
                         <p className="font-black text-base md:text-lg text-red-800">CONNECTION ISSUE</p>
@@ -450,14 +527,14 @@ export default function SessionPage() {
             </div>
           </div>
 
-          {/* File Transfers */}
+          {/* Enterprise File Transfers */}
           {fileTransfers.length > 0 && (
             <div className="w-full">
               <Card className="neubrutalism-card bg-green-200">
                 <CardHeader className="pb-3 md:pb-6">
                   <CardTitle className="text-lg md:text-2xl font-black flex items-center gap-2">
                     <FileText className="w-5 md:w-6 h-5 md:h-6" />
-                    BULLETPROOF TRANSFERS
+                    ENTERPRISE TRANSFERS
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -485,19 +562,42 @@ export default function SessionPage() {
                               </span>
                             )}
                           </div>
-                          <span
-                            className={`px-2 py-1 text-xs font-bold border-2 border-black flex-shrink-0 ${
-                              transfer.status === "completed"
-                                ? "bg-green-300"
-                                : transfer.status === "transferring"
-                                  ? "bg-yellow-300"
-                                  : transfer.status === "error"
-                                    ? "bg-red-300"
-                                    : "bg-gray-300"
-                            }`}
-                          >
-                            {transfer.status.toUpperCase()}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            {transfer.direction === "sending" && transfer.status === "transferring" && (
+                              <Button
+                                onClick={() => handlePauseTransfer(transfer.id)}
+                                size="sm"
+                                className="neubrutalism-button bg-yellow-500 text-white"
+                              >
+                                <Pause className="w-3 h-3" />
+                              </Button>
+                            )}
+                            {transfer.direction === "sending" && transfer.status === "paused" && (
+                              <Button
+                                onClick={() => handleResumeTransfer(transfer.id)}
+                                size="sm"
+                                className="neubrutalism-button bg-green-500 text-white"
+                              >
+                                <Play className="w-3 h-3" />
+                              </Button>
+                            )}
+                            {transfer.direction === "sending" && transfer.status !== "completed" && (
+                              <Button
+                                onClick={() => handleCancelTransfer(transfer.id)}
+                                size="sm"
+                                className="neubrutalism-button bg-red-500 text-white"
+                              >
+                                <Square className="w-3 h-3" />
+                              </Button>
+                            )}
+                            <span
+                              className={`px-2 py-1 text-xs font-bold border-2 border-black flex-shrink-0 ${getTransferStatusColor(
+                                transfer.status,
+                              )}`}
+                            >
+                              {transfer.status.toUpperCase()}
+                            </span>
+                          </div>
                         </div>
 
                         <div className="progress-bar">
