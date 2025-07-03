@@ -13,6 +13,7 @@ interface UserData {
   isMobile?: boolean
   browser?: string
   isStable?: boolean
+  backgroundMode?: boolean
 }
 
 interface Session {
@@ -25,7 +26,7 @@ interface Session {
   qualityScore?: number
 }
 
-class RockSolidSignalingServer {
+class UltraStableSignalingServer {
   private wss: WebSocketServer
   private sessions: Map<string, Session> = new Map()
   private userSessions: Map<WebSocket, string> = new Map()
@@ -40,7 +41,7 @@ class RockSolidSignalingServer {
   }
 
   constructor(port = process.env.PORT || 8080) {
-    console.log("🚀 Starting Rock-Solid Signaling Server - Fixed Reconnection Edition...")
+    console.log("🚀 Starting Ultra-Stable Signaling Server - Mobile & Speed Optimized...")
     console.log(`🌐 Port: ${port}`)
 
     this.server = createServer()
@@ -77,13 +78,14 @@ class RockSolidSignalingServer {
         res.writeHead(200, { "Content-Type": "application/json" })
         res.end(
           JSON.stringify({
-            status: "rock-solid-fixed",
+            status: "ultra-stable-optimized",
             timestamp: new Date().toISOString(),
             sessions: this.sessions.size,
             connections: this.userSessions.size,
             uptime: process.uptime(),
-            version: "2.1.0-fixed-reconnection",
+            version: "3.0.0-ultra-stable",
             stats: this.connectionStats,
+            features: ["mobile-optimized", "fast-reconnection", "large-file-support", "background-resilient"],
             activeSessions: Array.from(this.sessions.entries()).map(([id, session]) => ({
               id,
               userCount: session.users.size,
@@ -100,12 +102,12 @@ class RockSolidSignalingServer {
       res.end("Not Found")
     })
 
-    // Rock-solid WebSocket server
+    // Ultra-stable WebSocket server with mobile optimization
     this.wss = new WebSocketServer({
       server: this.server,
       perMessageDeflate: {
-        threshold: 1024,
-        concurrencyLimit: 10,
+        threshold: 512, // Lower threshold for mobile
+        concurrencyLimit: 20,
       },
       maxPayload: 100 * 1024 * 1024, // 100MB
       clientTracking: true,
@@ -141,12 +143,13 @@ class RockSolidSignalingServer {
       this.connectionStats.errors++
     })
 
-    // Session management with longer timeouts
-    setInterval(this.cleanup.bind(this), 5 * 60 * 1000) // Every 5 minutes
+    // Optimized cleanup intervals for mobile
+    setInterval(this.cleanup.bind(this), 2 * 60 * 1000) // Every 2 minutes
     setInterval(this.logStats.bind(this), 30 * 1000) // Every 30 seconds
+    setInterval(this.optimizeConnections.bind(this), 60 * 1000) // Every minute
 
     this.server.listen(port, "0.0.0.0", () => {
-      console.log(`✅ Rock-solid server running on port ${port}`)
+      console.log(`✅ Ultra-stable server running on port ${port}`)
       console.log(`🌍 Health check: http://0.0.0.0:${port}/health`)
       console.log("=".repeat(60))
     })
@@ -156,17 +159,18 @@ class RockSolidSignalingServer {
   }
 
   private shutdown() {
-    console.log("🛑 Shutting down rock-solid server...")
+    console.log("🛑 Shutting down ultra-stable server...")
     this.wss.clients.forEach((ws) => {
       if (ws.readyState === WebSocket.OPEN) {
         this.send(ws, {
           type: "server-shutdown",
-          message: "Server maintenance - reconnect in 5 seconds",
-          reconnectDelay: 5000,
+          message: "Server maintenance - reconnect in 3 seconds",
+          reconnectDelay: 3000,
         })
         ws.close(1000, "Server maintenance")
       }
     })
+
     this.server.close(() => {
       console.log("✅ Server shut down gracefully")
       process.exit(0)
@@ -181,15 +185,16 @@ class RockSolidSignalingServer {
     this.connectionStats.totalConnections++
     this.connectionStats.activeConnections++
 
-    console.log(`🔗 New rock-solid ${isMobile ? "mobile" : "desktop"} client: ${clientIP}`)
+    console.log(`🔗 New ultra-stable ${isMobile ? "mobile" : "desktop"} client: ${clientIP}`)
 
-    // Send immediate connection confirmation
+    // Send immediate connection confirmation with mobile optimization
     this.send(ws, {
       type: "connected",
-      message: "Rock-solid connection established - fixed reconnection",
+      message: "Ultra-stable connection established - mobile optimized",
       timestamp: new Date().toISOString(),
-      serverVersion: "2.1.0-fixed-reconnection",
-      features: ["fixed-p2p-reconnection", "stable-signaling", "large-file-support"],
+      serverVersion: "3.0.0-ultra-stable",
+      features: ["mobile-optimized", "fast-reconnection", "large-file-support", "background-resilient"],
+      mobileOptimized: isMobile,
     })
 
     ws.on("message", (data) => {
@@ -215,24 +220,25 @@ class RockSolidSignalingServer {
       this.handleDisconnection(ws)
     })
 
-    // Stable ping/pong with longer intervals
+    // Mobile-optimized ping/pong with adaptive intervals
     let missedPings = 0
-    const maxMissedPings = 3
+    const maxMissedPings = isMobile ? 5 : 3 // More tolerance for mobile
+    const pingInterval = isMobile ? 30000 : 20000 // Longer intervals for mobile
 
-    const pingInterval = setInterval(() => {
+    const pingTimer = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
-        ws.ping("rock-solid-ping")
+        ws.ping("ultra-stable-ping")
         missedPings++
 
         if (missedPings > maxMissedPings) {
           console.log(`⚠️ Client ${clientIP} missed ${missedPings} pings - closing`)
           ws.close(1008, "Connection timeout")
-          clearInterval(pingInterval)
+          clearInterval(pingTimer)
         }
       } else {
-        clearInterval(pingInterval)
+        clearInterval(pingTimer)
       }
-    }, 20000) // 20 second ping interval
+    }, pingInterval)
 
     ws.on("pong", () => {
       missedPings = 0
@@ -251,7 +257,7 @@ class RockSolidSignalingServer {
     })
 
     ws.on("close", () => {
-      clearInterval(pingInterval)
+      clearInterval(pingTimer)
     })
   }
 
@@ -271,6 +277,9 @@ class RockSolidSignalingServer {
       case "ping":
         this.handlePing(ws, sessionId, userId)
         break
+      case "background-mode":
+        this.handleBackgroundMode(ws, sessionId, userId, message.isBackground)
+        break
       case "offer":
       case "answer":
       case "ice-candidate":
@@ -288,9 +297,10 @@ class RockSolidSignalingServer {
     }
 
     console.log(`👤 User ${userId} ${isReconnect ? "reconnecting to" : "joining"} session ${sessionId}`)
-    console.log(`   Client: ${clientInfo.isMobile ? "Mobile" : "Desktop"}, ${clientInfo.browser || "Unknown"}`)
+    console.log(` Client: ${clientInfo.isMobile ? "Mobile" : "Desktop"}, ${clientInfo.browser || "Unknown"}`)
 
     let session = this.sessions.get(sessionId)
+
     if (!session) {
       session = {
         id: sessionId,
@@ -302,16 +312,18 @@ class RockSolidSignalingServer {
         qualityScore: 100,
       }
       this.sessions.set(sessionId, session)
-      console.log(`🆕 Created rock-solid session: ${sessionId}`)
+      console.log(`🆕 Created ultra-stable session: ${sessionId}`)
     }
 
-    // Handle reconnection
+    // Handle reconnection with enhanced mobile support
     const existingUser = session.users.get(userId)
     if (existingUser) {
       console.log(`🔄 User ${userId} reconnecting - preserving role and state`)
       existingUser.ws = ws
       existingUser.lastSeen = new Date()
       existingUser.isStable = true
+      existingUser.isMobile = clientInfo?.isMobile || false
+      existingUser.browser = clientInfo?.browser || "Unknown"
       this.userSessions.set(ws, sessionId)
       session.lastActivity = new Date()
       this.connectionStats.reconnections++
@@ -325,6 +337,7 @@ class RockSolidSignalingServer {
         reconnected: true,
         sessionState: "preserved",
         sessionUptime: Date.now() - session.createdAt.getTime(),
+        mobileOptimized: clientInfo?.isMobile || false,
       })
 
       this.broadcastToSession(
@@ -335,6 +348,7 @@ class RockSolidSignalingServer {
           userCount: session.users.size,
           reconnected: true,
           sessionPreserved: true,
+          fastReconnect: true,
         },
         ws,
       )
@@ -349,7 +363,7 @@ class RockSolidSignalingServer {
       return
     }
 
-    // Add new user
+    // Add new user with mobile optimization
     const isInitiator = session.users.size === 0
     const userData: UserData = {
       ws,
@@ -363,6 +377,7 @@ class RockSolidSignalingServer {
       isMobile: clientInfo?.isMobile || false,
       browser: clientInfo?.browser || "Unknown",
       isStable: true,
+      backgroundMode: false,
     }
 
     session.users.set(userId, userData)
@@ -370,7 +385,7 @@ class RockSolidSignalingServer {
     session.lastActivity = new Date()
 
     console.log(
-      `✅ User ${userId} joined rock-solid session ${sessionId} (${session.users.size}/2) ${isInitiator ? "[INITIATOR]" : "[RECEIVER]"}`,
+      `✅ User ${userId} joined ultra-stable session ${sessionId} (${session.users.size}/2) ${isInitiator ? "[INITIATOR]" : "[RECEIVER]"}`,
     )
 
     this.send(ws, {
@@ -380,12 +395,15 @@ class RockSolidSignalingServer {
       userId,
       isInitiator,
       sessionCreated: session.createdAt.toISOString(),
+      mobileOptimized: userData.isMobile,
       serverCapabilities: {
-        maxFileSize: "100MB",
-        chunkSize: "32KB",
+        maxFileSize: "1GB",
+        chunkSize: "64KB", // Larger chunks for speed
         resumableTransfers: true,
-        fixedReconnection: true,
+        fastReconnection: true,
         largeFileSupport: true,
+        mobileOptimized: true,
+        backgroundResilience: true,
       },
     })
 
@@ -396,25 +414,40 @@ class RockSolidSignalingServer {
         userId,
         userCount: session.users.size,
         readyForP2P: session.users.size === 2,
+        fastP2P: true,
       },
       ws,
     )
 
-    // Enhanced P2P initiation for 2 users
+    // Ultra-fast P2P initiation for 2 users
     if (session.users.size === 2) {
-      console.log(`🚀 Rock-solid session ${sessionId} ready - P2P initiation`)
+      console.log(`🚀 Ultra-stable session ${sessionId} ready - Fast P2P initiation`)
       session.isStable = true
       this.connectionStats.p2pConnections++
 
-      // Staggered P2P initiation for better reliability
+      // Immediate P2P initiation for speed
       setTimeout(() => {
         this.broadcastToSession(sessionId, {
           type: "p2p-ready",
           message: "Both users connected - P2P can be initiated",
           timestamp: Date.now(),
-          rockSolid: true,
+          ultraStable: true,
+          fastInit: true,
         })
-      }, 1500) // 1.5 second delay for stability
+      }, 500) // Reduced to 0.5 seconds for speed
+    }
+  }
+
+  private handleBackgroundMode(ws: WebSocket, sessionId: string, userId: string, isBackground: boolean) {
+    const session = this.sessions.get(sessionId)
+    if (session && userId) {
+      const user = session.users.get(userId)
+      if (user) {
+        user.backgroundMode = isBackground
+        user.lastSeen = new Date()
+        session.lastActivity = new Date()
+        console.log(`📱 User ${userId} ${isBackground ? "entered" : "exited"} background mode`)
+      }
     }
   }
 
@@ -436,7 +469,7 @@ class RockSolidSignalingServer {
       timestamp: Date.now(),
       serverTime: new Date().toISOString(),
       quality: "excellent",
-      rockSolid: true,
+      ultraStable: true,
     })
   }
 
@@ -454,6 +487,7 @@ class RockSolidSignalingServer {
     }
 
     session.lastActivity = new Date()
+
     const userId = Array.from(session.users.entries()).find(([_, userData]) => userData.ws === ws)?.[0]
 
     if (userId) {
@@ -469,10 +503,11 @@ class RockSolidSignalingServer {
       senderId: userId,
       timestamp: Date.now(),
       serverProcessed: new Date().toISOString(),
-      rockSolid: true,
+      ultraStable: true,
+      fastRelay: true,
     }
 
-    console.log(`🔄 Rock-solid relay ${message.type} from ${userId}`)
+    console.log(`🔄 Ultra-stable relay ${message.type} from ${userId}`)
     this.broadcastToSession(sessionId, relayMessage, ws)
   }
 
@@ -496,7 +531,7 @@ class RockSolidSignalingServer {
 
     if (disconnectedUserId) {
       this.userSessions.delete(ws)
-      console.log(`👋 User ${disconnectedUserId} disconnected from session ${sessionId} - preserving for reconnection`)
+      console.log(`👋 User ${disconnectedUserId} disconnected from session ${sessionId} - preserving for fast reconnection`)
 
       this.broadcastToSession(sessionId, {
         type: "user-left",
@@ -506,16 +541,17 @@ class RockSolidSignalingServer {
         timestamp: Date.now(),
         autoReconnect: true,
         sessionPreserved: true,
+        fastReconnect: true,
       })
 
-      // Extended cleanup with longer grace period for reconnection
+      // Extended cleanup with mobile-friendly grace period
       setTimeout(
         () => {
           const currentSession = this.sessions.get(sessionId)
           if (currentSession) {
             const user = currentSession.users.get(disconnectedUserId!)
-            if (user && Date.now() - user.lastSeen.getTime() > 10 * 60 * 1000) {
-              // 10 minutes grace period
+            if (user && Date.now() - user.lastSeen.getTime() > 15 * 60 * 1000) {
+              // 15 minutes grace period for mobile
               currentSession.users.delete(disconnectedUserId!)
               console.log(`🗑️ Removed user ${disconnectedUserId} after extended grace period`)
 
@@ -534,9 +570,40 @@ class RockSolidSignalingServer {
             }
           }
         },
-        10 * 60 * 1000,
-      ) // 10 minutes
+        15 * 60 * 1000,
+      ) // 15 minutes
     }
+  }
+
+  private optimizeConnections() {
+    // Optimize connections for mobile and slow networks
+    this.sessions.forEach((session, sessionId) => {
+      session.users.forEach((userData, userId) => {
+        if (userData.ws.readyState === WebSocket.OPEN) {
+          // Check connection quality
+          const timeSinceLastPing = Date.now() - (userData.lastPing || 0)
+          if (timeSinceLastPing > 60000) {
+            // 1 minute
+            userData.connectionQuality = "poor"
+          } else if (timeSinceLastPing > 30000) {
+            // 30 seconds
+            userData.connectionQuality = "good"
+          } else {
+            userData.connectionQuality = "excellent"
+          }
+
+          // Send optimization hints for mobile
+          if (userData.isMobile && userData.connectionQuality !== "excellent") {
+            this.send(userData.ws, {
+              type: "optimization-hint",
+              suggestion: "mobile-optimization",
+              quality: userData.connectionQuality,
+              timestamp: Date.now(),
+            })
+          }
+        }
+      })
+    })
   }
 
   private broadcastToSession(sessionId: string, message: any, excludeWs?: WebSocket) {
@@ -556,7 +623,7 @@ class RockSolidSignalingServer {
     })
 
     if (sentCount > 0) {
-      console.log(`📡 Rock-solid broadcast ${message.type} to ${sentCount} users`)
+      console.log(`📡 Ultra-stable broadcast ${message.type} to ${sentCount} users`)
     }
   }
 
@@ -577,7 +644,7 @@ class RockSolidSignalingServer {
       message,
       timestamp: Date.now(),
       recoverable: true,
-      rockSolid: true,
+      ultraStable: true,
     })
   }
 
@@ -587,19 +654,20 @@ class RockSolidSignalingServer {
 
     this.sessions.forEach((session, sessionId) => {
       const inactiveTime = now.getTime() - session.lastActivity.getTime()
-
-      // Extended timeout for better stability - 2 hours
-      const timeoutDuration = 2 * 60 * 60 * 1000
+      // Extended timeout for mobile users - 4 hours
+      const timeoutDuration = 4 * 60 * 60 * 1000
 
       if (inactiveTime > timeoutDuration) {
         expiredSessions.push(sessionId)
       } else {
-        // Clean inactive users with extended grace period
+        // Clean inactive users with mobile-friendly grace period
         const inactiveUsers: string[] = []
         session.users.forEach((userData, userId) => {
           const userInactiveTime = now.getTime() - userData.lastSeen.getTime()
-          if (userInactiveTime > 30 * 60 * 1000) {
-            // 30 minutes for users
+          // Longer timeout for mobile users - 45 minutes
+          const userTimeout = userData.isMobile ? 45 * 60 * 1000 : 30 * 60 * 1000
+
+          if (userInactiveTime > userTimeout) {
             inactiveUsers.push(userId)
           }
         })
@@ -622,7 +690,7 @@ class RockSolidSignalingServer {
           this.send(userData.ws, {
             type: "session-expired",
             message: "Session expired due to inactivity",
-            reconnectDelay: 3000,
+            reconnectDelay: 2000,
           })
           userData.ws.close(1000, "Session expired")
         })
@@ -635,21 +703,21 @@ class RockSolidSignalingServer {
   private logStats() {
     if (this.sessions.size > 0 || this.connectionStats.activeConnections > 0) {
       console.log(
-        `📊 Rock-Solid Stats: ${this.sessions.size} sessions, ${this.connectionStats.activeConnections} connections`,
+        `📊 Ultra-Stable Stats: ${this.sessions.size} sessions, ${this.connectionStats.activeConnections} connections`,
       )
       console.log(
-        `   Total: ${this.connectionStats.totalConnections}, P2P: ${this.connectionStats.p2pConnections}, Reconnects: ${this.connectionStats.reconnections}`,
+        ` Total: ${this.connectionStats.totalConnections}, P2P: ${this.connectionStats.p2pConnections}, Reconnects: ${this.connectionStats.reconnections}`,
       )
 
-      // Log active sessions
+      // Log active sessions with mobile info
       const activeSessions = Array.from(this.sessions.entries()).filter(([_, session]) => session.users.size > 0)
       if (activeSessions.length > 0) {
         console.log(
           `🔗 Active Sessions: ${activeSessions
-            .map(
-              ([id, session]) =>
-                `${id}(${session.users.size}/2, ${Math.round((Date.now() - session.createdAt.getTime()) / 1000 / 60)}min)`,
-            )
+            .map(([id, session]) => {
+              const mobileUsers = Array.from(session.users.values()).filter((u) => u.isMobile).length
+              return `${id}(${session.users.size}/2, ${mobileUsers}📱, ${Math.round((Date.now() - session.createdAt.getTime()) / 1000 / 60)}min)`
+            })
             .join(", ")}`,
         )
       }
@@ -657,6 +725,6 @@ class RockSolidSignalingServer {
   }
 }
 
-// Start rock-solid server
+// Start ultra-stable server
 const port = process.env.PORT || 8080
-new RockSolidSignalingServer(Number(port))
+new UltraStableSignalingServer(Number(port))

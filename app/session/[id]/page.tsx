@@ -6,22 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { useUser } from "@clerk/nextjs"
 import { useParams, useRouter } from "next/navigation"
-import {
-  Upload,
-  Download,
-  Users,
-  Wifi,
-  WifiOff,
-  FileText,
-  AlertTriangle,
-  CheckCircle,
-  X,
-  RefreshCw,
-  Shield,
-  Smartphone,
-  Monitor,
-} from "lucide-react"
-
+import { Upload, Download, Users, Wifi, WifiOff, FileText, AlertTriangle, CheckCircle, X, RefreshCw, Shield, Smartphone, Monitor } from 'lucide-react'
 import { FilePreviewModal } from "@/components/file-preview-modal"
 import { ChatPanel } from "@/components/chat-panel"
 import { BulletproofP2P } from "@/lib/bulletproof-p2p"
@@ -32,7 +17,7 @@ interface FileTransfer {
   size: number
   type: string
   progress: number
-  status: "pending" | "transferring" | "completed" | "error"
+  status: "pending" | "transferring" | "completed" | "error" | "cancelled"
   direction: "sending" | "receiving"
   speed?: number
 }
@@ -76,7 +61,6 @@ export default function SessionPage() {
     if (!user || !sessionId) return
 
     console.log("🚀 Initializing Bulletproof P2P System")
-
     const p2p = new BulletproofP2P(sessionId, user.id)
     p2pRef.current = p2p
 
@@ -151,6 +135,12 @@ export default function SessionPage() {
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
     if (files.length > 0) {
+      // Check file sizes (max 1GB per file)
+      const oversizedFiles = files.filter(file => file.size > 1024 * 1024 * 1024)
+      if (oversizedFiles.length > 0) {
+        setError(`Files too large: ${oversizedFiles.map(f => f.name).join(', ')}. Max size: 1GB per file`)
+        return
+      }
       setPreviewFiles(files)
       setShowPreview(true)
     }
@@ -176,8 +166,20 @@ export default function SessionPage() {
     setDragOver(false)
     const files = Array.from(e.dataTransfer.files)
     if (files.length > 0) {
+      // Check file sizes (max 1GB per file)
+      const oversizedFiles = files.filter(file => file.size > 1024 * 1024 * 1024)
+      if (oversizedFiles.length > 0) {
+        setError(`Files too large: ${oversizedFiles.map(f => f.name).join(', ')}. Max size: 1GB per file`)
+        return
+      }
       setPreviewFiles(files)
       setShowPreview(true)
+    }
+  }
+
+  const handleCancelTransfer = (transferId: string) => {
+    if (p2pRef.current) {
+      p2pRef.current.cancelFileTransfer(transferId)
     }
   }
 
@@ -188,7 +190,6 @@ export default function SessionPage() {
         if (user && sessionId) {
           const p2p = new BulletproofP2P(sessionId, user.id)
           p2pRef.current = p2p
-
           // Reattach handlers
           p2p.onConnectionStatusChange = (status) => setConnectionStatus(status)
           p2p.onSignalingStatusChange = (status) => setWsStatus(status)
@@ -198,7 +199,6 @@ export default function SessionPage() {
           p2p.onSpeedUpdate = (speed) => setCurrentSpeed(speed)
           p2p.onFileTransferUpdate = (transfers) => setFileTransfers(transfers)
           p2p.onChatMessage = (message) => setChatMessages((prev) => [...prev, message])
-
           p2p.initialize()
         }
       }, 1000)
@@ -256,8 +256,8 @@ export default function SessionPage() {
                 connectionStatus === "connected"
                   ? "bg-green-400"
                   : connectionStatus === "connecting"
-                    ? "bg-yellow-400"
-                    : "bg-red-400"
+                  ? "bg-yellow-400"
+                  : "bg-red-400"
               }`}
             >
               {connectionStatus === "connected" ? (
@@ -480,26 +480,39 @@ export default function SessionPage() {
                                 {transfer.speed < 1024
                                   ? `${transfer.speed.toFixed(0)} B/s`
                                   : transfer.speed < 1024 * 1024
-                                    ? `${(transfer.speed / 1024).toFixed(1)} KB/s`
-                                    : `${(transfer.speed / 1024 / 1024).toFixed(1)} MB/s`}
+                                  ? `${(transfer.speed / 1024).toFixed(1)} KB/s`
+                                  : `${(transfer.speed / 1024 / 1024).toFixed(1)} MB/s`}
                               </span>
                             )}
                           </div>
-                          <span
-                            className={`px-2 py-1 text-xs font-bold border-2 border-black flex-shrink-0 ${
-                              transfer.status === "completed"
-                                ? "bg-green-300"
-                                : transfer.status === "transferring"
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`px-2 py-1 text-xs font-bold border-2 border-black flex-shrink-0 ${
+                                transfer.status === "completed"
+                                  ? "bg-green-300"
+                                  : transfer.status === "transferring"
                                   ? "bg-yellow-300"
+                                  : transfer.status === "cancelled"
+                                  ? "bg-gray-300"
                                   : transfer.status === "error"
-                                    ? "bg-red-300"
-                                    : "bg-gray-300"
-                            }`}
-                          >
-                            {transfer.status.toUpperCase()}
-                          </span>
+                                  ? "bg-red-300"
+                                  : "bg-gray-300"
+                              }`}
+                            >
+                              {transfer.status.toUpperCase()}
+                            </span>
+                            {(transfer.status === "transferring" || transfer.status === "pending") && (
+                              <Button
+                                onClick={() => handleCancelTransfer(transfer.id)}
+                                size="sm"
+                                variant="ghost"
+                                className="p-1 h-auto"
+                              >
+                                <X className="w-3 h-3" />
+                              </Button>
+                            )}
+                          </div>
                         </div>
-
                         <div className="progress-bar">
                           <div className="progress-fill" style={{ width: `${transfer.progress}%` }} />
                         </div>
