@@ -264,7 +264,7 @@ export class BulletproofP2P {
           this.ws.close()
           this.scheduleReconnect()
         }
-      }, 102400)
+      }, 10000)
 
       this.ws.onopen = () => {
         clearTimeout(connectionTimeout)
@@ -307,7 +307,7 @@ export class BulletproofP2P {
         this.ws = null
         this.stopHeartbeat()
 
-        if (!this.isDestroyed && event.code !== 10240) {
+        if (!this.isDestroyed && event.code !== 1000) {
           this.scheduleReconnect()
         }
       }
@@ -887,11 +887,11 @@ export class BulletproofP2P {
         fileData.chunks.set(chunkIndex, chunkData)
         fileData.receivedSize += chunkData.byteLength
 
-        const progress = Math.round((fileData.chunks.size / fileData.totalChunks) * 1024)
+        const progress = Math.round((fileData.chunks.size / fileData.totalChunks) * 100)
         transfer.progress = Math.min(progress, 99)
 
         if (transfer.startTime) {
-          const elapsed = (Date.now() - transfer.startTime) / 10240
+          const elapsed = (Date.now() - transfer.startTime) / 1000
           transfer.speed = fileData.receivedSize / elapsed
         }
 
@@ -928,7 +928,7 @@ export class BulletproofP2P {
       this.downloadFile(blob, fileData.fileName)
 
       transfer.status = "completed"
-      transfer.progress = 1024
+      transfer.progress = 100
       this.fileTransfers.set(fileId, transfer)
       this.receivedChunks.delete(fileId)
       this.updateFileTransfers()
@@ -946,7 +946,7 @@ export class BulletproofP2P {
     const transfer = this.fileTransfers.get(message.fileId)
     if (transfer && transfer.direction === "sending") {
       transfer.status = "completed"
-      transfer.progress = 1024
+      transfer.progress = 100
       this.fileTransfers.set(message.fileId, transfer)
       this.updateFileTransfers()
       console.log(`✅ File ${transfer.name} sent`)
@@ -1042,11 +1042,11 @@ export class BulletproofP2P {
         this.dataChannel.send(message)
 
         // Update progress
-        const progress = Math.round(((i + 1) / totalChunks) * 1024)
+        const progress = Math.round(((i + 1) / totalChunks) * 100)
         transfer.progress = Math.min(progress, 99)
 
         if (transfer.startTime) {
-          const elapsed = (Date.now() - transfer.startTime) / 10240
+          const elapsed = (Date.now() - transfer.startTime) / 1000
           const bytesSent = (i + 1) * this.chunkSize
           transfer.speed = bytesSent / elapsed
         }
@@ -1105,7 +1105,7 @@ export class BulletproofP2P {
       if (!this.isDestroyed) {
         this.initialize()
       }
-    }, 10240)
+    }, 1000)
   }
 
   public getConnectionState() {

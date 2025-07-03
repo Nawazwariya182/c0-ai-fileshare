@@ -6,7 +6,21 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { useUser } from "@clerk/nextjs"
 import { useParams, useRouter } from "next/navigation"
-import { Upload, Download, Users, Wifi, WifiOff, FileText, AlertTriangle, CheckCircle, X, RefreshCw, Shield, Smartphone, Monitor } from 'lucide-react'
+import {
+  Upload,
+  Download,
+  Users,
+  Wifi,
+  WifiOff,
+  FileText,
+  AlertTriangle,
+  CheckCircle,
+  X,
+  RefreshCw,
+  Shield,
+  Smartphone,
+  Monitor,
+} from "lucide-react"
 
 import { FilePreviewModal } from "@/components/file-preview-modal"
 import { ChatPanel } from "@/components/chat-panel"
@@ -125,8 +139,7 @@ export default function SessionPage() {
   useEffect(() => {
     const checkMobile = () => {
       const isMobileDevice =
-        window.innerWidth < 768 ||
-        /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+        window.innerWidth < 768 || /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
       setIsMobile(isMobileDevice)
     }
 
@@ -175,7 +188,7 @@ export default function SessionPage() {
         if (user && sessionId) {
           const p2p = new BulletproofP2P(sessionId, user.id)
           p2pRef.current = p2p
-          
+
           // Reattach handlers
           p2p.onConnectionStatusChange = (status) => setConnectionStatus(status)
           p2p.onSignalingStatusChange = (status) => setWsStatus(status)
@@ -185,10 +198,10 @@ export default function SessionPage() {
           p2p.onSpeedUpdate = (speed) => setCurrentSpeed(speed)
           p2p.onFileTransferUpdate = (transfers) => setFileTransfers(transfers)
           p2p.onChatMessage = (message) => setChatMessages((prev) => [...prev, message])
-          
+
           p2p.initialize()
         }
-      }, 10240)
+      }, 1000)
     }
   }
 
@@ -210,6 +223,12 @@ export default function SessionPage() {
     }
   }
 
+  const getSpeedDisplay = () => {
+    if (currentSpeed === 0) return "0 KB/s"
+    if (currentSpeed < 1024) return `${currentSpeed.toFixed(0)} B/s`
+    if (currentSpeed < 1024 * 1024) return `${(currentSpeed / 1024).toFixed(1)} KB/s`
+    return `${(currentSpeed / 1024 / 1024).toFixed(1)} MB/s`
+  }
 
   return (
     <div className="min-h-screen bg-purple-300 p-2 md:p-4">
@@ -263,6 +282,7 @@ export default function SessionPage() {
 
             <div className="flex items-center gap-1 md:gap-2 px-2 md:px-4 py-1 md:py-2 border-2 md:border-4 border-black font-black bg-purple-400 text-xs md:text-sm">
               {isMobile ? <Smartphone className="w-3 h-3" /> : <Monitor className="w-3 h-3" />}
+              {getSpeedDisplay()}
             </div>
           </div>
         </header>
@@ -344,7 +364,7 @@ export default function SessionPage() {
                     />
                   </div>
                   <p className="text-xs md:text-sm font-bold mt-4 text-gray-600">
-                    Max 1GB per file • Multi-file support • AI Scanned • SHA-256 verified
+                    Max 1GB per file • Multi-file support • Bulletproof transfer
                   </p>
                 </div>
               </CardContent>
@@ -405,7 +425,7 @@ export default function SessionPage() {
                         <p className="font-black text-base md:text-lg text-green-800">BULLETPROOF CONNECTION!</p>
                         <p className="font-bold text-sm md:text-base">Maximum stability • Zero packet loss</p>
                         <p className="text-xs md:text-sm mt-2">
-                          Quality: {connectionQuality}
+                          Quality: {connectionQuality} • Speed: {getSpeedDisplay()}
                         </p>
                       </div>
                     )}
@@ -417,7 +437,7 @@ export default function SessionPage() {
                         <p className="font-bold mb-4 text-sm md:text-base">Auto-reconnecting...</p>
                         <Button
                           onClick={handleReconnect}
-                          className="neubrutalism-button bg-red-500 text-white hover:white hover:text-red-500 touch-target"
+                          className="neubrutalism-button bg-red-500 text-white touch-target"
                         >
                           <RefreshCw className="w-4 h-4 mr-2" />
                           FORCE RECONNECT
