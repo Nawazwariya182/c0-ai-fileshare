@@ -6,7 +6,21 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { useUser } from "@clerk/nextjs"
 import { useParams, useRouter } from "next/navigation"
-import { Upload, Download, Users, Wifi, WifiOff, FileText, AlertTriangle, CheckCircle, X, RefreshCw, Shield, Smartphone, Monitor } from 'lucide-react'
+import {
+  Upload,
+  Download,
+  Users,
+  Wifi,
+  WifiOff,
+  FileText,
+  AlertTriangle,
+  CheckCircle,
+  X,
+  RefreshCw,
+  Shield,
+  Smartphone,
+  Monitor,
+} from "lucide-react"
 import { FilePreviewModal } from "@/components/file-preview-modal"
 import { ChatPanel } from "@/components/chat-panel"
 import { BulletproofP2P } from "@/lib/bulletproof-p2p"
@@ -36,7 +50,7 @@ export default function SessionPage() {
   const router = useRouter()
   const sessionId = params.id as string
 
-  // Simple connection states
+  // Connection states
   const [connectionStatus, setConnectionStatus] = useState<"connecting" | "connected" | "disconnected">("connecting")
   const [wsStatus, setWsStatus] = useState<"connecting" | "connected" | "disconnected">("connecting")
   const [fileTransfers, setFileTransfers] = useState<FileTransfer[]>([])
@@ -52,21 +66,21 @@ export default function SessionPage() {
   const [currentSpeed, setCurrentSpeed] = useState(0)
   const [connectionQuality, setConnectionQuality] = useState<"excellent" | "good" | "poor">("excellent")
 
-  // Simple refs
+  // Refs
   const fileInputRef = useRef<HTMLInputElement>(null)
   const p2pRef = useRef<BulletproofP2P | null>(null)
 
-  // Initialize bulletproof P2P
+  // Initialize P2P
   useEffect(() => {
     if (!user || !sessionId) return
 
-    console.log("🚀 Initializing Bulletproof P2P System")
+    console.log("🚀 Initializing Simple P2P System")
     const p2p = new BulletproofP2P(sessionId, user.id)
     p2pRef.current = p2p
 
     // Set up event handlers
     p2p.onConnectionStatusChange = (status) => {
-      console.log(`🔗 Connection status: ${status}`)
+      console.log(`🔗 P2P status: ${status}`)
       setConnectionStatus(status)
       if (status === "connected") {
         setError("")
@@ -111,7 +125,7 @@ export default function SessionPage() {
       setError("")
     }
 
-    // Initialize connection
+    // Initialize
     p2p.initialize()
 
     return () => {
@@ -136,9 +150,9 @@ export default function SessionPage() {
     const files = Array.from(e.target.files || [])
     if (files.length > 0) {
       // Check file sizes (max 1GB per file)
-      const oversizedFiles = files.filter(file => file.size > 1024 * 1024 * 1024)
+      const oversizedFiles = files.filter((file) => file.size > 1024 * 1024 * 1024)
       if (oversizedFiles.length > 0) {
-        setError(`Files too large: ${oversizedFiles.map(f => f.name).join(', ')}. Max size: 1GB per file`)
+        setError(`Files too large: ${oversizedFiles.map((f) => f.name).join(", ")}. Max size: 1GB per file`)
         return
       }
       setPreviewFiles(files)
@@ -167,9 +181,9 @@ export default function SessionPage() {
     const files = Array.from(e.dataTransfer.files)
     if (files.length > 0) {
       // Check file sizes (max 1GB per file)
-      const oversizedFiles = files.filter(file => file.size > 1024 * 1024 * 1024)
+      const oversizedFiles = files.filter((file) => file.size > 1024 * 1024 * 1024)
       if (oversizedFiles.length > 0) {
-        setError(`Files too large: ${oversizedFiles.map(f => f.name).join(', ')}. Max size: 1GB per file`)
+        setError(`Files too large: ${oversizedFiles.map((f) => f.name).join(", ")}. Max size: 1GB per file`)
         return
       }
       setPreviewFiles(files)
@@ -185,23 +199,7 @@ export default function SessionPage() {
 
   const handleReconnect = () => {
     if (p2pRef.current) {
-      p2pRef.current.destroy()
-      setTimeout(() => {
-        if (user && sessionId) {
-          const p2p = new BulletproofP2P(sessionId, user.id)
-          p2pRef.current = p2p
-          // Reattach handlers
-          p2p.onConnectionStatusChange = (status) => setConnectionStatus(status)
-          p2p.onSignalingStatusChange = (status) => setWsStatus(status)
-          p2p.onUserCountChange = (count) => setUserCount(count)
-          p2p.onError = (errorMsg) => setError(errorMsg)
-          p2p.onConnectionQualityChange = (quality) => setConnectionQuality(quality)
-          p2p.onSpeedUpdate = (speed) => setCurrentSpeed(speed)
-          p2p.onFileTransferUpdate = (transfers) => setFileTransfers(transfers)
-          p2p.onChatMessage = (message) => setChatMessages((prev) => [...prev, message])
-          p2p.initialize()
-        }
-      }, 1000)
+      p2pRef.current.forceReconnect()
     }
   }
 
@@ -256,8 +254,8 @@ export default function SessionPage() {
                 connectionStatus === "connected"
                   ? "bg-green-400"
                   : connectionStatus === "connecting"
-                  ? "bg-yellow-400"
-                  : "bg-red-400"
+                    ? "bg-yellow-400"
+                    : "bg-red-400"
               }`}
             >
               {connectionStatus === "connected" ? (
@@ -480,8 +478,8 @@ export default function SessionPage() {
                                 {transfer.speed < 1024
                                   ? `${transfer.speed.toFixed(0)} B/s`
                                   : transfer.speed < 1024 * 1024
-                                  ? `${(transfer.speed / 1024).toFixed(1)} KB/s`
-                                  : `${(transfer.speed / 1024 / 1024).toFixed(1)} MB/s`}
+                                    ? `${(transfer.speed / 1024).toFixed(1)} KB/s`
+                                    : `${(transfer.speed / 1024 / 1024).toFixed(1)} MB/s`}
                               </span>
                             )}
                           </div>
@@ -491,12 +489,12 @@ export default function SessionPage() {
                                 transfer.status === "completed"
                                   ? "bg-green-300"
                                   : transfer.status === "transferring"
-                                  ? "bg-yellow-300"
-                                  : transfer.status === "cancelled"
-                                  ? "bg-gray-300"
-                                  : transfer.status === "error"
-                                  ? "bg-red-300"
-                                  : "bg-gray-300"
+                                    ? "bg-yellow-300"
+                                    : transfer.status === "cancelled"
+                                      ? "bg-gray-300"
+                                      : transfer.status === "error"
+                                        ? "bg-red-300"
+                                        : "bg-gray-300"
                               }`}
                             >
                               {transfer.status.toUpperCase()}

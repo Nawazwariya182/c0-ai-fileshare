@@ -531,7 +531,9 @@ class UltraStableSignalingServer {
 
     if (disconnectedUserId) {
       this.userSessions.delete(ws)
-      console.log(`👋 User ${disconnectedUserId} disconnected from session ${sessionId} - preserving for fast reconnection`)
+      console.log(
+        `👋 User ${disconnectedUserId} disconnected from session ${sessionId} - preserving for fast reconnection`,
+      )
 
       this.broadcastToSession(sessionId, {
         type: "user-left",
