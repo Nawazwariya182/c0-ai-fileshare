@@ -6,21 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { useUser } from "@clerk/nextjs"
 import { useParams, useRouter } from "next/navigation"
-import {
-  Upload,
-  Download,
-  Users,
-  Wifi,
-  WifiOff,
-  FileText,
-  AlertTriangle,
-  CheckCircle,
-  X,
-  RefreshCw,
-  Shield,
-  Smartphone,
-  Monitor,
-} from "lucide-react"
+import { Upload, Download, Users, Wifi, WifiOff, FileText, AlertTriangle, CheckCircle, X, RefreshCw, Shield, Smartphone, Monitor } from 'lucide-react'
+
 import { FilePreviewModal } from "@/components/file-preview-modal"
 import { ChatPanel } from "@/components/chat-panel"
 import { BulletproofP2P } from "@/lib/bulletproof-p2p"
@@ -31,7 +18,7 @@ interface FileTransfer {
   size: number
   type: string
   progress: number
-  status: "pending" | "transferring" | "completed" | "error" | "cancelled"
+  status: "pending" | "transferring" | "completed" | "error"
   direction: "sending" | "receiving"
   speed?: number
 }
@@ -50,7 +37,7 @@ export default function SessionPage() {
   const router = useRouter()
   const sessionId = params.id as string
 
-  // Connection states
+  // Simple connection states
   const [connectionStatus, setConnectionStatus] = useState<"connecting" | "connected" | "disconnected">("connecting")
   const [wsStatus, setWsStatus] = useState<"connecting" | "connected" | "disconnected">("connecting")
   const [fileTransfers, setFileTransfers] = useState<FileTransfer[]>([])
@@ -66,21 +53,22 @@ export default function SessionPage() {
   const [currentSpeed, setCurrentSpeed] = useState(0)
   const [connectionQuality, setConnectionQuality] = useState<"excellent" | "good" | "poor">("excellent")
 
-  // Refs
+  // Simple refs
   const fileInputRef = useRef<HTMLInputElement>(null)
   const p2pRef = useRef<BulletproofP2P | null>(null)
 
-  // Initialize P2P
+  // Initialize bulletproof P2P
   useEffect(() => {
     if (!user || !sessionId) return
 
-    console.log("🚀 Initializing Simple P2P System")
+    console.log("🚀 Initializing Bulletproof P2P System")
+
     const p2p = new BulletproofP2P(sessionId, user.id)
     p2pRef.current = p2p
 
     // Set up event handlers
     p2p.onConnectionStatusChange = (status) => {
-      console.log(`🔗 P2P status: ${status}`)
+      console.log(`🔗 Connection status: ${status}`)
       setConnectionStatus(status)
       if (status === "connected") {
         setError("")
@@ -125,7 +113,7 @@ export default function SessionPage() {
       setError("")
     }
 
-    // Initialize
+    // Initialize connection
     p2p.initialize()
 
     return () => {
@@ -137,7 +125,8 @@ export default function SessionPage() {
   useEffect(() => {
     const checkMobile = () => {
       const isMobileDevice =
-        window.innerWidth < 768 || /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+        window.innerWidth < 768 ||
+        /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
       setIsMobile(isMobileDevice)
     }
 
@@ -149,12 +138,6 @@ export default function SessionPage() {
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
     if (files.length > 0) {
-      // Check file sizes (max 1GB per file)
-      const oversizedFiles = files.filter((file) => file.size > 1024 * 1024 * 1024)
-      if (oversizedFiles.length > 0) {
-        setError(`Files too large: ${oversizedFiles.map((f) => f.name).join(", ")}. Max size: 1GB per file`)
-        return
-      }
       setPreviewFiles(files)
       setShowPreview(true)
     }
@@ -171,7 +154,19 @@ export default function SessionPage() {
 
   const handleSendChatMessage = (content: string, type: "text" | "clipboard") => {
     if (p2pRef.current) {
-      p2pRef.current.sendChatMessage(content, type, user?.firstName || "You")
+      // Create a chat message object and add it locally
+      const message: ChatMessage = {
+        id: Date.now().toString(),
+        content,
+        sender: user?.firstName || "You",
+        timestamp: new Date(),
+        type
+      }
+      setChatMessages((prev) => [...prev, message])
+      // Send through P2P if method exists
+      if ('sendMessage' in p2pRef.current) {
+        (p2pRef.current as any).sendMessage(message)
+      }
     }
   }
 
@@ -180,26 +175,32 @@ export default function SessionPage() {
     setDragOver(false)
     const files = Array.from(e.dataTransfer.files)
     if (files.length > 0) {
-      // Check file sizes (max 1GB per file)
-      const oversizedFiles = files.filter((file) => file.size > 1024 * 1024 * 1024)
-      if (oversizedFiles.length > 0) {
-        setError(`Files too large: ${oversizedFiles.map((f) => f.name).join(", ")}. Max size: 1GB per file`)
-        return
-      }
       setPreviewFiles(files)
       setShowPreview(true)
     }
   }
 
-  const handleCancelTransfer = (transferId: string) => {
-    if (p2pRef.current) {
-      p2pRef.current.cancelFileTransfer(transferId)
-    }
-  }
-
   const handleReconnect = () => {
     if (p2pRef.current) {
-      p2pRef.current.forceReconnect()
+      p2pRef.current.destroy()
+      setTimeout(() => {
+        if (user && sessionId) {
+          const p2p = new BulletproofP2P(sessionId, user.id)
+          p2pRef.current = p2p
+          
+          // Reattach handlers
+          p2p.onConnectionStatusChange = (status) => setConnectionStatus(status)
+          p2p.onSignalingStatusChange = (status) => setWsStatus(status)
+          p2p.onUserCountChange = (count) => setUserCount(count)
+          p2p.onError = (errorMsg) => setError(errorMsg)
+          p2p.onConnectionQualityChange = (quality) => setConnectionQuality(quality)
+          p2p.onSpeedUpdate = (speed) => setCurrentSpeed(speed)
+          p2p.onFileTransferUpdate = (transfers) => setFileTransfers(transfers)
+          p2p.onChatMessage = (message) => setChatMessages((prev) => [...prev, message])
+          
+          p2p.initialize()
+        }
+      }, 1000)
     }
   }
 
@@ -358,7 +359,7 @@ export default function SessionPage() {
                       multiple
                       onChange={handleFileSelect}
                       className="hidden"
-                      accept="*/*"
+                      accept="/"
                     />
                   </div>
                   <p className="text-xs md:text-sm font-bold mt-4 text-gray-600">
@@ -473,44 +474,31 @@ export default function SessionPage() {
                             <span className="text-xs md:text-sm text-gray-600 flex-shrink-0">
                               ({(transfer.size / 1024 / 1024).toFixed(1)}MB)
                             </span>
-                            {transfer.speed && transfer.speed > 0 && (
+                            {/* {transfer.speed && transfer.speed > 0 && (
                               <span className="text-xs md:text-sm text-blue-600 flex-shrink-0">
                                 {transfer.speed < 1024
-                                  ? `${transfer.speed.toFixed(0)} B/s`
+                                  ? ${transfer.speed.toFixed(0)} B/s
                                   : transfer.speed < 1024 * 1024
-                                    ? `${(transfer.speed / 1024).toFixed(1)} KB/s`
-                                    : `${(transfer.speed / 1024 / 1024).toFixed(1)} MB/s`}
+                                    ? ${(transfer.speed / 1024).toFixed(1)} KB/s
+                                    : ${(transfer.speed / 1024 / 1024).toFixed(1)} MB/s}
                               </span>
-                            )}
+                            )} */}
                           </div>
-                          <div className="flex items-center gap-2">
-                            <span
-                              className={`px-2 py-1 text-xs font-bold border-2 border-black flex-shrink-0 ${
-                                transfer.status === "completed"
-                                  ? "bg-green-300"
-                                  : transfer.status === "transferring"
-                                    ? "bg-yellow-300"
-                                    : transfer.status === "cancelled"
-                                      ? "bg-gray-300"
-                                      : transfer.status === "error"
-                                        ? "bg-red-300"
-                                        : "bg-gray-300"
-                              }`}
-                            >
-                              {transfer.status.toUpperCase()}
-                            </span>
-                            {(transfer.status === "transferring" || transfer.status === "pending") && (
-                              <Button
-                                onClick={() => handleCancelTransfer(transfer.id)}
-                                size="sm"
-                                variant="ghost"
-                                className="p-1 h-auto"
-                              >
-                                <X className="w-3 h-3" />
-                              </Button>
-                            )}
-                          </div>
+                          <span
+                            className={`px-2 py-1 text-xs font-bold border-2 border-black flex-shrink-0 ${
+                              transfer.status === "completed"
+                                ? "bg-green-300"
+                                : transfer.status === "transferring"
+                                  ? "bg-yellow-300"
+                                  : transfer.status === "error"
+                                    ? "bg-red-300"
+                                    : "bg-gray-300"
+                            }`}
+                          >
+                            {transfer.status.toUpperCase()}
+                          </span>
                         </div>
+
                         <div className="progress-bar">
                           <div className="progress-fill" style={{ width: `${transfer.progress}%` }} />
                         </div>
