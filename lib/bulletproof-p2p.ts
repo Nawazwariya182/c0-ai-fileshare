@@ -175,6 +175,7 @@ export class BulletproofP2P {
   async initialize(): Promise<void> {
     try {
       this.isDestroyed = false
+      this.checkDownloadPermissions()
       await this.connectToSignalingServer()
       this.startPerformanceMonitoring()
       this.startHealthMonitoring()
@@ -808,7 +809,7 @@ export class BulletproofP2P {
         break
         
       case 'file-complete':
-        this.handleFileComplete(message.data)
+        this.handleFileComplete(message.data as FileCompleteData & { success?: boolean; error?: string; fileName?: string })
         break
         
       case 'ping':
@@ -980,6 +981,7 @@ export class BulletproofP2P {
       
       // Initialize incoming file if not exists
       if (!this.incomingFiles.has(fileId)) {
+        console.log(`📥 Starting to receive file: ${fileName} (${totalChunks} chunks)`)
         this.incomingFiles.set(fileId, {
           chunks: new Map(),
           totalChunks,
@@ -1005,9 +1007,12 @@ export class BulletproofP2P {
       const incomingFile = this.incomingFiles.get(fileId)!
       const transfer = this.fileTransfers.get(fileId)!
       
-      // Store chunk
-      incomingFile.chunks.set(chunkIndex, chunkData)
-      incomingFile.receivedChunks++
+      // Store chunk (avoid duplicates)
+      if (!incomingFile.chunks.has(chunkIndex)) {
+        incomingFile.chunks.set(chunkIndex, chunkData)
+        incomingFile.receivedChunks++
+        console.log(`📦 Received chunk ${chunkIndex + 1}/${totalChunks} for ${fileName}`)
+      }
       
       // Update progress
       transfer.progress = Math.round((incomingFile.receivedChunks / totalChunks) * 100)
@@ -1015,6 +1020,7 @@ export class BulletproofP2P {
       
       // Check if file is complete
       if (incomingFile.receivedChunks === totalChunks) {
+        console.log(`✅ All chunks received for ${fileName} - assembling file...`)
         this.assembleAndDownloadFile(fileId)
       }
       
@@ -1027,64 +1033,158 @@ export class BulletproofP2P {
     const incomingFile = this.incomingFiles.get(fileId)
     const transfer = this.fileTransfers.get(fileId)
     
-    if (!incomingFile || !transfer) return
+    if (!incomingFile || !transfer) {
+      console.error(`❌ Missing file data for ${fileId}`)
+      return
+    }
+    
+    console.log(`🔧 Assembling file: ${incomingFile.fileName}`)
     
     try {
-      // Assemble chunks in order
-      const chunks: ArrayBuffer[] = []
+      // Verify all chunks are present
+      const missingChunks: number[] = []
       for (let i = 0; i < incomingFile.totalChunks; i++) {
-        const chunk = incomingFile.chunks.get(i)
-        if (!chunk) {
-          throw new Error(`Missing chunk ${i}`)
+        if (!incomingFile.chunks.has(i)) {
+          missingChunks.push(i)
         }
-        chunks.push(chunk)
       }
       
-      // Create blob and download
-      const blob = new Blob(chunks, { type: incomingFile.fileType })
-      const url = URL.createObjectURL(blob)
+      if (missingChunks.length > 0) {
+        console.error(`❌ Missing chunks for ${incomingFile.fileName}:`, missingChunks)
+        transfer.status = "error"
+        this.updateFileTransfers()
+        return
+      }
       
+      // Assemble chunks in order
+      const chunks: ArrayBuffer[] = []
+      let totalSize = 0
+      
+      for (let i = 0; i < incomingFile.totalChunks; i++) {
+        const chunk = incomingFile.chunks.get(i)!
+        chunks.push(chunk)
+        totalSize += chunk.byteLength
+      }
+      
+      console.log(`📊 Assembled ${chunks.length} chunks, total size: ${totalSize} bytes`)
+      
+      // Create blob and download
+      const blob = new Blob(chunks, { type: incomingFile.fileType || 'application/octet-stream' })
+      console.log(`💾 Created blob: ${blob.size} bytes, type: ${blob.type}`)
+      
+      // Trigger download
+      const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
       a.download = incomingFile.fileName
+      a.style.display = 'none'
+      
+      // Add to DOM, click, and remove
       document.body.appendChild(a)
+      console.log(`⬇️ Triggering download for: ${incomingFile.fileName}`)
       a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
+      
+      // Clean up after a short delay
+      setTimeout(() => {
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+        console.log(`🧹 Cleaned up download link for: ${incomingFile.fileName}`)
+      }, 100)
       
       // Mark as completed
       transfer.status = "completed"
       transfer.progress = 100
       this.updateFileTransfers()
       
+      // Send completion notification to sender
+      this.sendP2PMessage({
+        type: 'file-complete',
+        data: { 
+          fileId: fileId,
+          fileName: incomingFile.fileName,
+          success: true 
+        },
+        timestamp: Date.now(),
+        id: this.generateId()
+      })
+      
       // Cleanup
       this.incomingFiles.delete(fileId)
-      console.log(`✅ File ${incomingFile.fileName} received and downloaded`)
+      
+      console.log(`✅ File ${incomingFile.fileName} completed successfully`)
+      
+      // Show success notification if available
+      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+        new Notification('File Received', {
+          body: `${incomingFile.fileName} has been downloaded`,
+          icon: '/favicon.ico'
+        })
+      }
+      
     } catch (error) {
-      console.error(`❌ Failed to assemble file:`, error)
+      console.error(`❌ Failed to assemble file ${incomingFile.fileName}:`, error)
       transfer.status = "error"
       this.updateFileTransfers()
+      
+      // Send error notification to sender
+      this.sendP2PMessage({
+        type: 'file-complete',
+        data: { 
+          fileId: fileId,
+          fileName: incomingFile.fileName,
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        },
+        timestamp: Date.now(),
+        id: this.generateId()
+      })
     }
   }
   
-  private handleFileOffer(data: FileOfferData): void {
-    console.log(`📥 File offer received: ${data.fileName}`)
-    // Auto-accept for now - could add user confirmation later
-    this.sendP2PMessage({
-      type: 'file-accept',
-      data: { fileId: data.fileId },
-      timestamp: Date.now(),
-      id: this.generateId()
-    })
-  }
-  
-  private handleFileAccept(data: FileAcceptData): void {
-    console.log(`✅ File accepted: ${data.fileId}`)
-    // File transfer will continue automatically
-  }
-  
-  private handleFileComplete(data: FileCompleteData): void {
+  private handleFileComplete(data: FileCompleteData & { success?: boolean; error?: string; fileName?: string }): void {
     console.log(`✅ File transfer completed: ${data.fileId}`)
+    
+    if (data.success === false) {
+      console.error(`❌ File transfer failed on receiver: ${data.error}`)
+      this.onError?.(`File transfer failed: ${data.fileName} - ${data.error}`)
+    } else {
+      console.log(`🎉 File transfer successful: ${data.fileName}`)
+    }
+    
+    // Update sender's transfer status if it exists
+    const transfer = this.fileTransfers.get(data.fileId)
+    if (transfer && transfer.direction === "sending") {
+      if (data.success !== false) {
+        transfer.status = "completed"
+        console.log(`📤 Sender confirmed: ${transfer.name} delivered successfully`)
+      } else {
+        transfer.status = "error"
+        console.log(`📤 Sender notified: ${transfer.name} failed on receiver`)
+      }
+      this.updateFileTransfers()
+    }
+  }
+
+  private checkDownloadPermissions(): boolean {
+    try {
+      // Check if we can create and click download links
+      const testLink = document.createElement('a')
+      testLink.download = 'test'
+      testLink.href = 'data:text/plain,test'
+      
+      // Some browsers block programmatic downloads
+      const canDownload = typeof testLink.download !== 'undefined'
+      
+      if (!canDownload) {
+        console.warn('⚠️ Browser may block automatic downloads')
+        this.onError?.('Browser may block automatic downloads. Please allow downloads for this site.')
+      }
+      
+      return canDownload
+    } catch (error) {
+      console.error('❌ Download permission check failed:', error)
+      return false
+    }
   }
   
   private sendP2PMessage(message: P2PMessage): void {
@@ -1204,5 +1304,42 @@ export class BulletproofP2P {
     this.fileTransfers.clear()
     this.incomingFiles.clear()
     this.chatMessages = []
+  }
+  
+  private handleFileOffer(data: FileOfferData): void {
+    console.log(`📥 File offer received: ${data.fileName} (${data.fileSize} bytes)`)
+    
+    // Create a transfer record for the incoming file
+    const transfer: FileTransfer = {
+      id: data.fileId,
+      name: data.fileName,
+      size: data.fileSize,
+      type: data.fileType,
+      progress: 0,
+      status: "pending",
+      direction: "receiving"
+    }
+    
+    this.fileTransfers.set(data.fileId, transfer)
+    this.updateFileTransfers()
+    
+    // Auto-accept file offers (you can modify this to show a confirmation dialog)
+    this.sendP2PMessage({
+      type: 'file-accept',
+      data: { fileId: data.fileId },
+      timestamp: Date.now(),
+      id: this.generateId()
+    })
+    
+    console.log(`✅ Auto-accepted file: ${data.fileName}`)
+  }
+  
+  private handleFileAccept(data: FileAcceptData): void {
+    console.log(`✅ File accepted: ${data.fileId}`)
+    const transfer = this.fileTransfers.get(data.fileId)
+    if (transfer && transfer.direction === "sending") {
+      transfer.status = "transferring"
+      this.updateFileTransfers()
+    }
   }
 }
