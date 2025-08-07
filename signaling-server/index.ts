@@ -1,664 +1,726 @@
-import { WebSocketServer, WebSocket } from "ws"
-import { createServer } from "http"
-
-interface UserData {
-  ws: WebSocket
-  userId: string
-  joinedAt: Date
-  lastSeen: Date
-  isInitiator: boolean
-  connectionQuality?: "excellent" | "good" | "poor"
-  lastPing?: number
-  missedPings?: number
-  isMobile?: boolean
-  browser?: string
-  isStable?: boolean
-}
-
-interface Session {
+interface FileTransfer {
   id: string
-  users: Map<string, UserData>
-  createdAt: Date
-  lastActivity: Date
-  connectionAttempts?: number
-  isStable?: boolean
-  qualityScore?: number
-  rockSolid?: boolean
+  name: string
+  size: number
+  type: string
+  progress: number
+  status: "pending" | "transferring" | "completed" | "error"
+  direction: "sending" | "receiving"
+  speed?: number
+  file?: File
+  chunks?: ArrayBuffer[]
+  totalChunks?: number
+  receivedChunks?: number
 }
 
-class EnhancedBulletproofSignalingServer {
-  private wss: WebSocketServer
-  private sessions: Map<string, Session> = new Map()
-  private userSessions: Map<WebSocket, string> = new Map()
-  private server: any
-  private connectionStats = {
-    totalConnections: 0,
-    activeConnections: 0,
-    reconnections: 0,
-    errors: 0,
-    p2pConnections: 0,
-    stabilityScore: 100,
+interface ChatMessage {
+  id: string
+  content: string
+  sender: string
+  timestamp: Date
+  type: "text" | "clipboard"
+}
+
+export class BulletproofP2P {
+  private ws: WebSocket | null = null
+  private pc: RTCPeerConnection | null = null
+  private dataChannel: RTCDataChannel | null = null
+  private sessionId: string
+  private userId: string
+  private isInitiator = false
+  private reconnectAttempts = 0
+  private maxReconnectAttempts = 10
+  private reconnectDelay = 1000
+  private fileTransfers = new Map<string, FileTransfer>()
+  private pendingICECandidates: RTCIceCandidate[] = []
+  private connectionStartTime = 0
+  private lastSpeedUpdate = 0
+  private bytesTransferred = 0
+  private chunkSize = 64 * 1024 // 64KB chunks
+  private maxConcurrentTransfers = 3
+
+  // Event handlers
+  public onConnectionStatusChange?: (status: "connecting" | "connected" | "disconnected") => void
+  public onSignalingStatusChange?: (status: "connecting" | "connected" | "disconnected") => void
+  public onUserCountChange?: (count: number) => void
+  public onError?: (error: string) => void
+  public onConnectionQualityChange?: (quality: "excellent" | "good" | "poor") => void
+  public onSpeedUpdate?: (speed: number) => void
+  public onFileTransferUpdate?: (transfers: FileTransfer[]) => void
+  public onChatMessage?: (message: ChatMessage) => void
+  public onConnectionRecovery?: () => void
+
+  constructor(sessionId: string, userId: string) {
+    this.sessionId = sessionId
+    this.userId = userId
+    console.log(`🚀 BulletproofP2P initialized for session ${sessionId}`)
   }
 
-  constructor(port = process.env.PORT || 8080) {
-    console.log("🚀 Starting Enhanced Bulletproof Signaling Server...")
-    console.log(`🌐 Port: ${port}`)
-
-    this.server = createServer()
-
-    // Enhanced CORS handling
-    this.server.on("request", (req, res) => {
-      const origin = req.headers.origin
-      const allowedOrigins = [
-        "https://p2p-file-share-fix.vercel.app",
-        "https://c0-ai.live",
-        "https://vercel.app",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "https://localhost:3000",
-      ]
-
-      if (origin && (allowedOrigins.includes(origin) || origin.includes(".vercel.app"))) {
-        res.setHeader("Access-Control-Allow-Origin", origin)
-      } else if (!origin) {
-        res.setHeader("Access-Control-Allow-Origin", "*")
-      }
-
-      res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-      res.setHeader("Access-Control-Allow-Headers", "Content-Type")
-      res.setHeader("Access-Control-Allow-Credentials", "true")
-
-      if (req.method === "OPTIONS") {
-        res.writeHead(200)
-        res.end()
-        return
-      }
-
-      if (req.url === "/health" || req.url === "/") {
-        res.writeHead(200, { "Content-Type": "application/json" })
-        res.end(
-          JSON.stringify({
-            status: "enhanced-bulletproof",
-            timestamp: new Date().toISOString(),
-            sessions: this.sessions.size,
-            connections: this.userSessions.size,
-            uptime: process.uptime(),
-            version: "2.0.0-enhanced",
-            stats: this.connectionStats,
-            activeSessions: Array.from(this.sessions.entries()).map(([id, session]) => ({
-              id,
-              userCount: session.users.size,
-              isStable: session.isStable,
-              lastActivity: session.lastActivity,
-            })),
-          }),
-        )
-        return
-      }
-
-      res.writeHead(404)
-      res.end("Not Found")
-    })
-
-    // Enhanced WebSocket server
-    this.wss = new WebSocketServer({
-      server: this.server,
-      perMessageDeflate: {
-        threshold: 1024,
-        concurrencyLimit: 10,
-      },
-      maxPayload: 100 * 1024 * 1024, // 100MB
-      clientTracking: true,
-      verifyClient: (info) => {
-        const origin = info.origin
-        console.log(`🔍 Verifying client from: ${origin}`)
-
-        if (!origin) return true
-
-        const allowedOrigins = [
-          "https://p2p-file-share-fix.vercel.app",
-          "https://c0-ai.live",
-          "https://vercel.app",
-          "http://localhost:3000",
-          "http://127.0.0.1:3000",
-          "https://localhost:3000",
-        ]
-
-        const isAllowed =
-          allowedOrigins.includes(origin) ||
-          origin.includes(".vercel.app") ||
-          origin.includes("localhost") ||
-          origin.includes("127.0.0.1")
-
-        console.log(`${isAllowed ? "✅" : "❌"} Origin ${origin} ${isAllowed ? "allowed" : "blocked"}`)
-        return isAllowed
-      },
-    })
-
-    this.wss.on("connection", this.handleConnection.bind(this))
-    this.wss.on("error", (error) => {
-      console.error("❌ WebSocket Server error:", error)
-      this.connectionStats.errors++
-    })
-
-    // Enhanced session management
-    setInterval(this.cleanup.bind(this), 2 * 60 * 1000) // Every 2 minutes
-    setInterval(this.logStats.bind(this), 30 * 1000) // Every 30 seconds
-
-    this.server.listen(port, "0.0.0.0", () => {
-      console.log(`✅ Enhanced Bulletproof server running on port ${port}`)
-      console.log(`🌍 Health check: http://0.0.0.0:${port}/health`)
-      console.log("=".repeat(60))
-    })
-
-    process.on("SIGTERM", this.shutdown.bind(this))
-    process.on("SIGINT", this.shutdown.bind(this))
-  }
-
-  private shutdown() {
-    console.log("🛑 Shutting down enhanced server...")
-    this.wss.clients.forEach((ws) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        this.send(ws, {
-          type: "server-shutdown",
-          message: "Server maintenance - reconnect in 5 seconds",
-          reconnectDelay: 5000,
-        })
-        ws.close(1000, "Server maintenance")
-      }
-    })
-    this.server.close(() => {
-      console.log("✅ Server shut down gracefully")
-      process.exit(0)
-    })
-  }
-
-  private handleConnection(ws: WebSocket, req: any) {
-    const clientIP = req.socket.remoteAddress
-    const userAgent = req.headers["user-agent"]
-    const isMobile = /Mobile|Android|iPhone|iPad/i.test(userAgent || "")
-
-    this.connectionStats.totalConnections++
-    this.connectionStats.activeConnections++
-
-    console.log(`🔗 New ${isMobile ? "mobile" : "desktop"} client: ${clientIP}`)
-
-    // Send immediate connection confirmation
-    this.send(ws, {
-      type: "connected",
-      message: "Enhanced bulletproof connection established",
-      timestamp: new Date().toISOString(),
-      serverVersion: "2.0.0-enhanced",
-      features: ["bulletproof-p2p", "stable-signaling", "enhanced-reliability"],
-    })
-
-    ws.on("message", (data) => {
-      try {
-        const message = JSON.parse(data.toString())
-        console.log(`📨 ${message.type} from ${clientIP} ${message.sessionId ? `(${message.sessionId})` : ""}`)
-        this.handleMessage(ws, message)
-      } catch (error) {
-        console.error("❌ Message parse error:", error)
-        this.sendError(ws, "Invalid message format")
-      }
-    })
-
-    ws.on("close", (code, reason) => {
-      console.log(`🔌 Client disconnected: ${code} ${reason} (${clientIP})`)
-      this.connectionStats.activeConnections--
-      this.handleDisconnection(ws)
-    })
-
-    ws.on("error", (error) => {
-      console.error(`❌ WebSocket error from ${clientIP}:`, error)
-      this.connectionStats.errors++
-      this.handleDisconnection(ws)
-    })
-
-    // Enhanced ping/pong with longer intervals for stability
-    let missedPings = 0
-    const maxMissedPings = 3
-
-    const pingInterval = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.ping("enhanced-ping")
-        missedPings++
-
-        if (missedPings > maxMissedPings) {
-          console.log(`⚠ Client ${clientIP} missed ${missedPings} pings - closing`)
-          ws.close(1008, "Connection timeout")
-          clearInterval(pingInterval)
-        }
-      } else {
-        clearInterval(pingInterval)
-      }
-    }, 30000) // 30 second ping interval
-
-    ws.on("pong", () => {
-      missedPings = 0
-      const sessionId = this.userSessions.get(ws)
-      if (sessionId) {
-        const session = this.sessions.get(sessionId)
-        if (session) {
-          const userData = Array.from(session.users.values()).find((u) => u.ws === ws)
-          if (userData) {
-            userData.lastPing = Date.now()
-            userData.missedPings = 0
-            userData.isStable = true
-          }
-        }
-      }
-    })
-
-    ws.on("close", () => {
-      clearInterval(pingInterval)
-    })
-  }
-
-  private handleMessage(ws: WebSocket, message: any) {
-    const { type, sessionId, userId } = message
-
-    // Enhanced validation
-    if (sessionId && !/^[A-Z0-9]{6}$/.test(sessionId)) {
-      this.sendError(ws, "Invalid session ID format")
-      return
-    }
-
-    switch (type) {
-      case "join":
-        this.handleJoin(ws, sessionId, userId, message.clientInfo)
-        break
-      case "ping":
-        this.handlePing(ws, sessionId, userId)
-        break
-      case "keep-alive":
-        this.handleKeepAlive(ws, sessionId, userId)
-        break
-      case "offer":
-      case "answer":
-      case "ice-candidate":
-        this.relaySignalingMessage(ws, message)
-        break
-      default:
-        console.log(`⚠ Unknown message type: ${type}`)
+  public async initialize() {
+    try {
+      await this.connectToSignalingServer()
+    } catch (error) {
+      console.error("❌ Failed to initialize P2P:", error)
+      this.onError?.("Failed to initialize connection")
     }
   }
 
-  private handleJoin(ws: WebSocket, sessionId: string, userId: string, clientInfo: any = {}) {
-    if (!sessionId || !userId) {
-      this.sendError(ws, "Session ID and User ID are required")
-      return
-    }
+  private async connectToSignalingServer() {
+    const wsUrl = process.env.NODE_ENV === 'production' 
+      ? 'wss://bulletproof-signaling-server.onrender.com'
+      : 'ws://localhost:8080'
 
-    console.log(`👤 User ${userId} joining session ${sessionId}`)
-    console.log(`   Client: ${clientInfo.isMobile ? "Mobile" : "Desktop"}, ${clientInfo.browser || "Unknown"}`)
+    console.log(`🔗 Connecting to signaling server: ${wsUrl}`)
+    this.onSignalingStatusChange?.("connecting")
 
-    let session = this.sessions.get(sessionId)
-    if (!session) {
-      session = {
-        id: sessionId,
-        users: new Map(),
-        createdAt: new Date(),
-        lastActivity: new Date(),
-        connectionAttempts: 0,
-        isStable: false,
-        qualityScore: 100,
-        rockSolid: true,
+    try {
+      this.ws = new WebSocket(wsUrl)
+      
+      this.ws.onopen = () => {
+        console.log("✅ WebSocket connected")
+        this.onSignalingStatusChange?.("connected")
+        this.reconnectAttempts = 0
+        this.joinSession()
       }
-      this.sessions.set(sessionId, session)
-      console.log(`🆕 Created enhanced session: ${sessionId}`)
-    }
 
-    // Handle reconnection
-    const existingUser = session.users.get(userId)
-    if (existingUser) {
-      console.log(`🔄 User ${userId} reconnecting - maintaining state`)
-      existingUser.ws = ws
-      existingUser.lastSeen = new Date()
-      existingUser.isStable = true
-      this.userSessions.set(ws, sessionId)
-      session.lastActivity = new Date()
-      this.connectionStats.reconnections++
-
-      this.send(ws, {
-        type: "joined",
-        sessionId,
-        userCount: session.users.size,
-        userId,
-        isInitiator: existingUser.isInitiator,
-        reconnected: true,
-        sessionState: "maintained",
-      })
-
-      this.broadcastToSession(
-        sessionId,
-        {
-          type: "user-joined",
-          userId,
-          userCount: session.users.size,
-          reconnected: true,
-        },
-        ws,
-      )
-
-      return
-    }
-
-    // Check capacity
-    if (session.users.size >= 2) {
-      console.log(`❌ Session ${sessionId} is full`)
-      this.sendError(ws, "Session is full (maximum 2 users)")
-      return
-    }
-
-    // Add new user
-    const isInitiator = session.users.size === 0
-    const userData: UserData = {
-      ws,
-      userId,
-      joinedAt: new Date(),
-      lastSeen: new Date(),
-      isInitiator,
-      connectionQuality: "excellent",
-      lastPing: Date.now(),
-      missedPings: 0,
-      isMobile: clientInfo?.isMobile || false,
-      browser: clientInfo?.browser || "Unknown",
-      isStable: true,
-    }
-
-    session.users.set(userId, userData)
-    this.userSessions.set(ws, sessionId)
-    session.lastActivity = new Date()
-
-    console.log(
-      `✅ User ${userId} joined session ${sessionId} (${session.users.size}/2) ${isInitiator ? "[INITIATOR]" : "[RECEIVER]"}`,
-    )
-
-    this.send(ws, {
-      type: "joined",
-      sessionId,
-      userCount: session.users.size,
-      userId,
-      isInitiator,
-      sessionCreated: session.createdAt.toISOString(),
-      serverCapabilities: {
-        maxFileSize: "100MB",
-        chunkSize: "64KB",
-        resumableTransfers: true,
-        enhancedStability: true,
-      },
-    })
-
-    this.broadcastToSession(
-      sessionId,
-      {
-        type: "user-joined",
-        userId,
-        userCount: session.users.size,
-        readyForP2P: session.users.size === 2,
-      },
-      ws,
-    )
-
-    // Enhanced P2P initiation for 2 users
-    if (session.users.size === 2) {
-      console.log(`🚀 Session ${sessionId} ready - enhanced P2P initiation`)
-      session.isStable = true
-      this.connectionStats.p2pConnections++
-
-      // Staggered P2P initiation for better reliability
-      setTimeout(() => {
-        this.broadcastToSession(sessionId, {
-          type: "p2p-ready",
-          message: "Both users connected - P2P can be initiated",
-          timestamp: Date.now(),
-          enhanced: true,
-        })
-      }, 1000) // 1 second delay for stability
-    }
-  }
-
-  private handlePing(ws: WebSocket, sessionId: string, userId: string) {
-    const session = this.sessions.get(sessionId)
-    if (session && userId) {
-      const user = session.users.get(userId)
-      if (user) {
-        user.lastSeen = new Date()
-        user.lastPing = Date.now()
-        user.missedPings = 0
-        user.isStable = true
-        session.lastActivity = new Date()
-      }
-    }
-
-    this.send(ws, {
-      type: "pong",
-      timestamp: Date.now(),
-      serverTime: new Date().toISOString(),
-      quality: "excellent",
-      enhanced: true,
-    })
-  }
-
-  private handleKeepAlive(ws: WebSocket, sessionId: string, userId: string) {
-    const session = this.sessions.get(sessionId)
-    if (session && userId) {
-      const user = session.users.get(userId)
-      if (user) {
-        user.lastSeen = new Date()
-        user.isStable = true
-        session.lastActivity = new Date()
-      }
-    }
-
-    this.send(ws, {
-      type: "keep-alive-ack",
-      timestamp: Date.now(),
-      status: "maintained",
-    })
-  }
-
-  private relaySignalingMessage(ws: WebSocket, message: any) {
-    const sessionId = this.userSessions.get(ws)
-    if (!sessionId) {
-      this.sendError(ws, "Not in a session")
-      return
-    }
-
-    const session = this.sessions.get(sessionId)
-    if (!session) {
-      this.sendError(ws, "Session not found")
-      return
-    }
-
-    session.lastActivity = new Date()
-    const userId = Array.from(session.users.entries()).find(([_, userData]) => userData.ws === ws)?.[0]
-
-    if (userId) {
-      const user = session.users.get(userId)
-      if (user) {
-        user.lastSeen = new Date()
-        user.isStable = true
-      }
-    }
-
-    const relayMessage = {
-      ...message,
-      senderId: userId,
-      timestamp: Date.now(),
-      serverProcessed: new Date().toISOString(),
-      enhanced: true,
-    }
-
-    console.log(`🔄 Enhanced relay ${message.type} from ${userId}`)
-    this.broadcastToSession(sessionId, relayMessage, ws)
-  }
-
-  private handleDisconnection(ws: WebSocket) {
-    const sessionId = this.userSessions.get(ws)
-    if (!sessionId) return
-
-    const session = this.sessions.get(sessionId)
-    if (!session) return
-
-    let disconnectedUserId: string | undefined
-
-    for (const [userId, userData] of session.users.entries()) {
-      if (userData.ws === ws) {
-        disconnectedUserId = userId
-        userData.lastSeen = new Date()
-        userData.isStable = false
-        break
-      }
-    }
-
-    if (disconnectedUserId) {
-      this.userSessions.delete(ws)
-      console.log(`👋 User ${disconnectedUserId} disconnected from session ${sessionId}`)
-
-      this.broadcastToSession(sessionId, {
-        type: "user-left",
-        userId: disconnectedUserId,
-        userCount: session.users.size,
-        temporary: true,
-        timestamp: Date.now(),
-        autoReconnect: true,
-      })
-
-      // Enhanced cleanup with longer grace period
-      setTimeout(() => {
-        const currentSession = this.sessions.get(sessionId)
-        if (currentSession) {
-          const user = currentSession.users.get(disconnectedUserId!)
-          if (user && Date.now() - user.lastSeen.getTime() > 45000) {
-            // 45 seconds grace period
-            currentSession.users.delete(disconnectedUserId!)
-            console.log(`🗑 Removed inactive user ${disconnectedUserId}`)
-
-            this.broadcastToSession(sessionId, {
-              type: "user-left",
-              userId: disconnectedUserId,
-              userCount: currentSession.users.size,
-              permanent: true,
-              timestamp: Date.now(),
-            })
-
-            if (currentSession.users.size === 0) {
-              this.sessions.delete(sessionId)
-              console.log(`🗑 Removed empty session: ${sessionId}`)
-            }
-          }
-        }
-      }, 45000) // 45 seconds
-    }
-  }
-
-  private broadcastToSession(sessionId: string, message: any, excludeWs?: WebSocket) {
-    const session = this.sessions.get(sessionId)
-    if (!session) return
-
-    let sentCount = 0
-    session.users.forEach((userData) => {
-      if (userData.ws !== excludeWs && userData.ws.readyState === WebSocket.OPEN) {
+      this.ws.onmessage = (event) => {
         try {
-          this.send(userData.ws, message)
-          sentCount++
+          const message = JSON.parse(event.data)
+          this.handleSignalingMessage(message)
         } catch (error) {
-          console.error("❌ Broadcast error:", error)
+          console.error("❌ Failed to parse signaling message:", error)
         }
       }
-    })
 
-    if (sentCount > 0) {
-      console.log(`📡 Enhanced broadcast ${message.type} to ${sentCount} users`)
+      this.ws.onclose = (event) => {
+        console.log(`🔌 WebSocket closed: ${event.code} ${event.reason}`)
+        this.onSignalingStatusChange?.("disconnected")
+        this.handleWebSocketClose()
+      }
+
+      this.ws.onerror = (error) => {
+        console.error("❌ WebSocket error:", error)
+        this.onSignalingStatusChange?.("disconnected")
+        this.onError?.("Signaling server connection failed")
+      }
+
+    } catch (error) {
+      console.error("❌ WebSocket connection failed:", error)
+      this.onSignalingStatusChange?.("disconnected")
+      this.scheduleReconnect()
     }
   }
 
-  private send(ws: WebSocket, message: any) {
-    if (ws.readyState === WebSocket.OPEN) {
-      try {
-        ws.send(JSON.stringify(message))
-      } catch (error) {
-        console.error("❌ Send error:", error)
+  private joinSession() {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      const message = {
+        type: "join",
+        sessionId: this.sessionId,
+        userId: this.userId,
+        clientInfo: {
+          isMobile: /Mobile|Android|iPhone|iPad/i.test(navigator.userAgent),
+          browser: this.getBrowserInfo(),
+          timestamp: Date.now()
+        }
       }
+      
+      console.log("📤 Joining session:", message)
+      this.ws.send(JSON.stringify(message))
     }
   }
 
-  private sendError(ws: WebSocket, message: string) {
-    console.error(`❌ Error: ${message}`)
-    this.send(ws, {
-      type: "error",
-      message,
-      timestamp: Date.now(),
-      recoverable: true,
-      enhanced: true,
-    })
+  private getBrowserInfo(): string {
+    const ua = navigator.userAgent
+    if (ua.includes('Chrome')) return 'Chrome'
+    if (ua.includes('Firefox')) return 'Firefox'
+    if (ua.includes('Safari')) return 'Safari'
+    if (ua.includes('Edge')) return 'Edge'
+    return 'Unknown'
   }
 
-  private cleanup() {
-    const now = new Date()
-    const expiredSessions: string[] = []
+  private async handleSignalingMessage(message: any) {
+    console.log(`📨 Signaling message: ${message.type}`)
 
-    this.sessions.forEach((session, sessionId) => {
-      const inactiveTime = now.getTime() - session.lastActivity.getTime()
+    switch (message.type) {
+      case "joined":
+        this.isInitiator = message.isInitiator
+        this.onUserCountChange?.(message.userCount)
+        console.log(`✅ Joined session as ${this.isInitiator ? 'initiator' : 'receiver'}`)
+        break
 
-      // Extended timeout for enhanced sessions
-      const timeoutDuration = session.isStable ? 3 * 60 * 60 * 1000 : 2 * 60 * 60 * 1000 // 3 or 2 hours
-
-      if (inactiveTime > timeoutDuration) {
-        expiredSessions.push(sessionId)
-      } else {
-        // Clean inactive users
-        const inactiveUsers: string[] = []
-        session.users.forEach((userData, userId) => {
-          const userInactiveTime = now.getTime() - userData.lastSeen.getTime()
-          if (userInactiveTime > 60 * 60 * 1000) {
-            // 60 minutes
-            inactiveUsers.push(userId)
-          }
-        })
-
-        inactiveUsers.forEach((userId) => {
-          session.users.delete(userId)
-          console.log(`🧹 Cleaned inactive user ${userId}`)
-        })
-
-        if (session.users.size === 0) {
-          expiredSessions.push(sessionId)
+      case "user-joined":
+        this.onUserCountChange?.(message.userCount)
+        if (message.readyForP2P) {
+          console.log("🚀 Ready for P2P - starting connection")
+          await this.startP2PConnection()
         }
-      }
-    })
+        break
 
-    expiredSessions.forEach((sessionId) => {
-      const session = this.sessions.get(sessionId)
-      if (session) {
-        session.users.forEach((userData) => {
-          this.send(userData.ws, {
-            type: "session-expired",
-            message: "Session expired - please reconnect",
-            reconnectDelay: 3000,
+      case "p2p-ready":
+        if (this.isInitiator) {
+          console.log("🎯 Initiating P2P connection")
+          await this.createOffer()
+        }
+        break
+
+      case "offer":
+        if (!this.isInitiator) {
+          console.log("📥 Received offer")
+          await this.handleOffer(message)
+        }
+        break
+
+      case "answer":
+        if (this.isInitiator) {
+          console.log("📥 Received answer")
+          await this.handleAnswer(message)
+        }
+        break
+
+      case "ice-candidate":
+        console.log("🧊 Received ICE candidate")
+        await this.handleICECandidate(message)
+        break
+
+      case "error":
+        console.error("❌ Signaling error:", message.message)
+        this.onError?.(message.message)
+        break
+
+      case "user-left":
+        this.onUserCountChange?.(message.userCount)
+        if (!message.temporary) {
+          this.onConnectionStatusChange?.("disconnected")
+        }
+        break
+    }
+  }
+
+  private async startP2PConnection() {
+    try {
+      console.log("🔧 Setting up P2P connection")
+      this.onConnectionStatusChange?.("connecting")
+      
+      // Create peer connection with STUN servers
+      this.pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun2.l.google.com:19302' }
+        ],
+        iceCandidatePoolSize: 10
+      })
+
+      // Set up event handlers
+      this.pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          console.log("🧊 Sending ICE candidate")
+          this.sendSignalingMessage({
+            type: "ice-candidate",
+            candidate: event.candidate
           })
-          userData.ws.close(1000, "Session expired")
-        })
-        this.sessions.delete(sessionId)
-        console.log(`⏰ Expired session: ${sessionId}`)
+        }
       }
+
+      this.pc.onconnectionstatechange = () => {
+        const state = this.pc?.connectionState
+        console.log(`🔗 P2P connection state: ${state}`)
+        
+        switch (state) {
+          case "connected":
+            this.onConnectionStatusChange?.("connected")
+            this.onConnectionQualityChange?.("excellent")
+            this.connectionStartTime = Date.now()
+            this.onConnectionRecovery?.()
+            break
+          case "disconnected":
+          case "failed":
+            this.onConnectionStatusChange?.("disconnected")
+            this.onConnectionQualityChange?.("poor")
+            this.handleP2PDisconnection()
+            break
+          case "connecting":
+            this.onConnectionStatusChange?.("connecting")
+            break
+        }
+      }
+
+      this.pc.ondatachannel = (event) => {
+        console.log("📡 Data channel received")
+        this.setupDataChannel(event.channel)
+      }
+
+      // Process any pending ICE candidates
+      for (const candidate of this.pendingICECandidates) {
+        await this.pc.addIceCandidate(candidate)
+      }
+      this.pendingICECandidates = []
+
+    } catch (error) {
+      console.error("❌ Failed to start P2P connection:", error)
+      this.onError?.("Failed to establish P2P connection")
+    }
+  }
+
+  private async createOffer() {
+    if (!this.pc) return
+
+    try {
+      // Create data channel for file transfers and chat
+      this.dataChannel = this.pc.createDataChannel("bulletproof", {
+        ordered: true,
+        maxRetransmits: 3
+      })
+      this.setupDataChannel(this.dataChannel)
+
+      console.log("📤 Creating offer")
+      const offer = await this.pc.createOffer()
+      await this.pc.setLocalDescription(offer)
+
+      this.sendSignalingMessage({
+        type: "offer",
+        offer: offer
+      })
+    } catch (error) {
+      console.error("❌ Failed to create offer:", error)
+      this.onError?.("Failed to create connection offer")
+    }
+  }
+
+  private async handleOffer(message: any) {
+    if (!this.pc) return
+
+    try {
+      console.log("📥 Processing offer")
+      await this.pc.setRemoteDescription(message.offer)
+      
+      const answer = await this.pc.createAnswer()
+      await this.pc.setLocalDescription(answer)
+
+      this.sendSignalingMessage({
+        type: "answer",
+        answer: answer
+      })
+    } catch (error) {
+      console.error("❌ Failed to handle offer:", error)
+      this.onError?.("Failed to process connection offer")
+    }
+  }
+
+  private async handleAnswer(message: any) {
+    if (!this.pc) return
+
+    try {
+      console.log("📥 Processing answer")
+      await this.pc.setRemoteDescription(message.answer)
+    } catch (error) {
+      console.error("❌ Failed to handle answer:", error)
+      this.onError?.("Failed to process connection answer")
+    }
+  }
+
+  private async handleICECandidate(message: any) {
+    try {
+      const candidate = new RTCIceCandidate(message.candidate)
+      
+      if (this.pc && this.pc.remoteDescription) {
+        await this.pc.addIceCandidate(candidate)
+      } else {
+        // Store for later if remote description isn't set yet
+        this.pendingICECandidates.push(candidate)
+      }
+    } catch (error) {
+      console.error("❌ Failed to handle ICE candidate:", error)
+    }
+  }
+
+  private setupDataChannel(channel: RTCDataChannel) {
+    console.log("🔧 Setting up data channel")
+    this.dataChannel = channel
+
+    channel.onopen = () => {
+      console.log("✅ Data channel opened")
+      this.onConnectionStatusChange?.("connected")
+    }
+
+    channel.onclose = () => {
+      console.log("🔌 Data channel closed")
+      this.onConnectionStatusChange?.("disconnected")
+    }
+
+    channel.onerror = (error) => {
+      console.error("❌ Data channel error:", error)
+      this.onError?.("Data channel error")
+    }
+
+    channel.onmessage = (event) => {
+      this.handleDataChannelMessage(event.data)
+    }
+  }
+
+  private handleDataChannelMessage(data: string | ArrayBuffer) {
+    try {
+      if (typeof data === 'string') {
+        const message = JSON.parse(data)
+        this.handleP2PMessage(message)
+      } else {
+        // Handle binary data (file chunks)
+        this.handleFileChunk(data)
+      }
+    } catch (error) {
+      console.error("❌ Failed to handle data channel message:", error)
+    }
+  }
+
+  private handleP2PMessage(message: any) {
+    switch (message.type) {
+      case "chat":
+        console.log("💬 Received chat message")
+        this.onChatMessage?.(message.data)
+        break
+
+      case "file-offer":
+        console.log("📁 Received file offer")
+        this.handleFileOffer(message.data)
+        break
+
+      case "file-accept":
+        console.log("✅ File transfer accepted")
+        this.startFileTransfer(message.transferId)
+        break
+
+      case "file-chunk-ack":
+        console.log("📦 Chunk acknowledged")
+        this.handleChunkAck(message.transferId, message.chunkIndex)
+        break
+
+      case "file-complete":
+        console.log("✅ File transfer complete")
+        this.handleFileComplete(message.transferId)
+        break
+
+      case "ping":
+        this.sendP2PMessage({ type: "pong", timestamp: Date.now() })
+        break
+
+      case "pong":
+        this.updateConnectionQuality(message.timestamp)
+        break
+    }
+  }
+
+  public async sendFiles(files: File[]) {
+    if (!this.dataChannel || this.dataChannel.readyState !== 'open') {
+      this.onError?.("No active P2P connection")
+      return
+    }
+
+    console.log(`📤 Sending ${files.length} files`)
+
+    for (const file of files) {
+      const transferId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+      
+      const transfer: FileTransfer = {
+        id: transferId,
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        progress: 0,
+        status: "pending",
+        direction: "sending",
+        file: file,
+        totalChunks: Math.ceil(file.size / this.chunkSize),
+        receivedChunks: 0
+      }
+
+      this.fileTransfers.set(transferId, transfer)
+      this.updateFileTransfers()
+
+      // Send file offer
+      this.sendP2PMessage({
+        type: "file-offer",
+        data: {
+          transferId,
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          totalChunks: transfer.totalChunks
+        }
+      })
+    }
+  }
+
+  private handleFileOffer(data: any) {
+    const { transferId, name, size, type, totalChunks } = data
+    
+    console.log(`📥 File offer: ${name} (${(size / 1024 / 1024).toFixed(1)}MB)`)
+
+    const transfer: FileTransfer = {
+      id: transferId,
+      name,
+      size,
+      type,
+      progress: 0,
+      status: "pending",
+      direction: "receiving",
+      chunks: new Array(totalChunks),
+      totalChunks,
+      receivedChunks: 0
+    }
+
+    this.fileTransfers.set(transferId, transfer)
+    this.updateFileTransfers()
+
+    // Auto-accept file transfers
+    this.sendP2PMessage({
+      type: "file-accept",
+      transferId
+    })
+
+    transfer.status = "transferring"
+    this.updateFileTransfers()
+  }
+
+  private async startFileTransfer(transferId: string) {
+    const transfer = this.fileTransfers.get(transferId)
+    if (!transfer || !transfer.file) return
+
+    console.log(`🚀 Starting file transfer: ${transfer.name}`)
+    transfer.status = "transferring"
+    this.updateFileTransfers()
+
+    const file = transfer.file
+    const totalChunks = Math.ceil(file.size / this.chunkSize)
+    
+    for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+      const start = chunkIndex * this.chunkSize
+      const end = Math.min(start + this.chunkSize, file.size)
+      const chunk = file.slice(start, end)
+      
+      try {
+        const arrayBuffer = await chunk.arrayBuffer()
+        
+        // Send chunk header
+        this.sendP2PMessage({
+          type: "file-chunk-header",
+          transferId,
+          chunkIndex,
+          chunkSize: arrayBuffer.byteLength
+        })
+
+        // Send chunk data
+        if (this.dataChannel?.readyState === 'open') {
+          this.dataChannel.send(arrayBuffer)
+          
+          // Update progress
+          transfer.progress = Math.round(((chunkIndex + 1) / totalChunks) * 100)
+          this.updateTransferSpeed(arrayBuffer.byteLength)
+          this.updateFileTransfers()
+
+          // Small delay to prevent overwhelming the connection
+          await new Promise(resolve => setTimeout(resolve, 10))
+        }
+      } catch (error) {
+        console.error(`❌ Failed to send chunk ${chunkIndex}:`, error)
+        transfer.status = "error"
+        this.updateFileTransfers()
+        return
+      }
+    }
+
+    transfer.status = "completed"
+    transfer.progress = 100
+    this.updateFileTransfers()
+
+    this.sendP2PMessage({
+      type: "file-complete",
+      transferId
+    })
+
+    console.log(`✅ File transfer completed: ${transfer.name}`)
+  }
+
+  private handleFileChunk(data: ArrayBuffer) {
+    // Find the transfer expecting this chunk
+    // This is a simplified version - in practice you'd need better chunk tracking
+    for (const [transferId, transfer] of this.fileTransfers) {
+      if (transfer.direction === "receiving" && transfer.status === "transferring") {
+        if (transfer.chunks && transfer.receivedChunks !== undefined) {
+          const chunkIndex = transfer.receivedChunks
+          transfer.chunks[chunkIndex] = data
+          transfer.receivedChunks++
+          
+          transfer.progress = Math.round((transfer.receivedChunks / (transfer.totalChunks || 1)) * 100)
+          this.updateTransferSpeed(data.byteLength)
+          this.updateFileTransfers()
+
+          // Check if file is complete
+          if (transfer.receivedChunks === transfer.totalChunks) {
+            this.completeFileReceive(transferId)
+          }
+          break
+        }
+      }
+    }
+  }
+
+  private completeFileReceive(transferId: string) {
+    const transfer = this.fileTransfers.get(transferId)
+    if (!transfer || !transfer.chunks) return
+
+    console.log(`✅ File received: ${transfer.name}`)
+
+    // Combine chunks into blob
+    const blob = new Blob(transfer.chunks, { type: transfer.type })
+    
+    // Create download link
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = transfer.name
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+
+    transfer.status = "completed"
+    transfer.progress = 100
+    this.updateFileTransfers()
+  }
+
+  public sendChatMessage(message: ChatMessage) {
+    if (!this.dataChannel || this.dataChannel.readyState !== 'open') {
+      this.onError?.("No active P2P connection for chat")
+      return
+    }
+
+    console.log("💬 Sending chat message")
+    this.sendP2PMessage({
+      type: "chat",
+      data: message
     })
   }
 
-  private logStats() {
-    if (this.sessions.size > 0 || this.connectionStats.activeConnections > 0) {
-      console.log(
-        `📊 Enhanced Stats: ${this.sessions.size} sessions, ${this.connectionStats.activeConnections} connections`,
-      )
-      console.log(
-        `   Total: ${this.connectionStats.totalConnections}, P2P: ${this.connectionStats.p2pConnections}, Reconnects: ${this.connectionStats.reconnections}`,
-      )
+  private sendP2PMessage(message: any) {
+    if (this.dataChannel?.readyState === 'open') {
+      this.dataChannel.send(JSON.stringify(message))
+    }
+  }
+
+  private sendSignalingMessage(message: any) {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({
+        ...message,
+        sessionId: this.sessionId,
+        userId: this.userId
+      }))
+    }
+  }
+
+  private updateTransferSpeed(bytes: number) {
+    this.bytesTransferred += bytes
+    const now = Date.now()
+    
+    if (now - this.lastSpeedUpdate > 1000) { // Update every second
+      const speed = this.bytesTransferred / ((now - this.lastSpeedUpdate) / 1000)
+      this.onSpeedUpdate?.(speed)
+      this.bytesTransferred = 0
+      this.lastSpeedUpdate = now
+    }
+  }
+
+  private updateConnectionQuality(pingTimestamp: number) {
+    const latency = Date.now() - pingTimestamp
+    let quality: "excellent" | "good" | "poor"
+    
+    if (latency < 100) quality = "excellent"
+    else if (latency < 300) quality = "good"
+    else quality = "poor"
+    
+    this.onConnectionQualityChange?.(quality)
+  }
+
+  private updateFileTransfers() {
+    const transfers = Array.from(this.fileTransfers.values())
+    this.onFileTransferUpdate?.(transfers)
+  }
+
+  private handleP2PDisconnection() {
+    console.log("🔌 P2P connection lost - attempting recovery")
+    this.onConnectionStatusChange?.("disconnected")
+    
+    // Attempt to reconnect
+    setTimeout(() => {
+      if (this.ws?.readyState === WebSocket.OPEN) {
+        this.startP2PConnection()
+      }
+    }, 2000)
+  }
+
+  private handleWebSocketClose() {
+    this.onSignalingStatusChange?.("disconnected")
+    this.scheduleReconnect()
+  }
+
+  private scheduleReconnect() {
+    if (this.reconnectAttempts < this.maxReconnectAttempts) {
+      this.reconnectAttempts++
+      const delay = Math.min(this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1), 30000)
+      
+      console.log(`🔄 Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`)
+      
+      setTimeout(() => {
+        this.connectToSignalingServer()
+      }, delay)
+    } else {
+      console.error("❌ Max reconnection attempts reached")
+      this.onError?.("Connection failed - please refresh the page")
+    }
+  }
+
+  public reconnect() {
+    console.log("🔄 Manual reconnect triggered")
+    this.reconnectAttempts = 0
+    this.destroy()
+    setTimeout(() => {
+      this.initialize()
+    }, 1000)
+  }
+
+  public destroy() {
+    console.log("🛑 Destroying P2P connection")
+    
+    if (this.dataChannel) {
+      this.dataChannel.close()
+      this.dataChannel = null
+    }
+    
+    if (this.pc) {
+      this.pc.close()
+      this.pc = null
+    }
+    
+    if (this.ws) {
+      this.ws.close()
+      this.ws = null
+    }
+    
+    this.fileTransfers.clear()
+  }
+
+  // Additional methods for chunk acknowledgment and error handling
+  private handleChunkAck(transferId: string, chunkIndex: number) {
+    // Implementation for chunk acknowledgment
+    console.log(`✅ Chunk ${chunkIndex} acknowledged for transfer ${transferId}`)
+  }
+
+  private handleFileComplete(transferId: string) {
+    const transfer = this.fileTransfers.get(transferId)
+    if (transfer) {
+      transfer.status = "completed"
+      transfer.progress = 100
+      this.updateFileTransfers()
+      console.log(`✅ File transfer completed: ${transfer.name}`)
     }
   }
 }
-
-// Start enhanced server
-const port = process.env.PORT || 8080
-new EnhancedBulletproofSignalingServer(Number(port))
