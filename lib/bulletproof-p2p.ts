@@ -91,10 +91,11 @@ export class BulletproofP2P {
   private currentSpeed: number = 0
   private userCount: number = 0
   
-  // File transfer state
+  // File transfer state - OPTIMIZED FOR SPEED
   private fileTransfers: Map<string, FileTransfer> = new Map()
   private incomingFiles: Map<string, IncomingFileData> = new Map()
   private pendingFiles: Map<string, File> = new Map()
+  private sendingFiles: Map<string, { file: File; chunks: ArrayBuffer[]; totalChunks: number }> = new Map()
   
   // Chat state
   private chatMessages: ChatMessage[] = []
@@ -116,13 +117,13 @@ export class BulletproofP2P {
   private isDestroyed: boolean = false
   private connectionAttempts: number = 0
   private isConnecting: boolean = false
-  private iceGatheringComplete: boolean = false
   
-  // Optimized settings for stability and speed
-  private chunkSize: number = 64 * 1024 // 64KB - good balance of speed and reliability
-  private maxConcurrentChunks: number = 8 // Send up to 8 chunks concurrently
+  // HIGH SPEED OPTIMIZED SETTINGS
+  private chunkSize: number = 256 * 1024 // 256KB chunks for maximum speed
+  private maxBufferedAmount: number = 2 * 1024 * 1024 // 2MB buffer
+  private concurrentChunks: number = 16 // Send 16 chunks concurrently
   
-  // WebRTC Configuration - STABLE AND RELIABLE
+  // WebRTC Configuration - OPTIMIZED FOR SPEED AND STABILITY
   private rtcConfig: RTCConfiguration = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
@@ -144,7 +145,7 @@ export class BulletproofP2P {
   async initialize(): Promise<void> {
     if (this.isDestroyed) return
     
-    console.log('🔧 Initializing stable P2P connection...')
+    console.log('🔧 Initializing HIGH-SPEED P2P connection...')
     this.isDestroyed = false
     
     try {
@@ -227,7 +228,7 @@ export class BulletproofP2P {
         console.log(`⏰ Connection timeout: ${wsUrl}`)
         cleanup()
         resolve(false)
-      }, 15000) // 15 second timeout
+      }, 15000)
       
       ws.onopen = () => {
         if (resolved) return
@@ -308,7 +309,7 @@ export class BulletproofP2P {
   private scheduleReconnect(): void {
     if (this.isDestroyed || this.reconnectTimeout) return
     
-    const delay = Math.min(3000 * this.connectionAttempts, 15000) // Max 15 seconds
+    const delay = Math.min(3000 * this.connectionAttempts, 15000)
     console.log(`🔄 Scheduling reconnect in ${delay}ms`)
     
     this.reconnectTimeout = setTimeout(() => {
@@ -340,7 +341,7 @@ export class BulletproofP2P {
         console.log(`👤 User joined (${this.userCount} users)`)
         
         if (this.userCount === 2 && this.isInitiator && !this.pc) {
-          console.log('🚀 Both users present - initiating P2P connection...')
+          console.log('🚀 Both users present - initiating HIGH-SPEED P2P connection...')
           setTimeout(() => this.initiatePeerConnection(), 1000)
         }
         break
@@ -378,11 +379,9 @@ export class BulletproofP2P {
     }
     
     try {
-      console.log('🔧 Creating stable peer connection...')
+      console.log('🔧 Creating HIGH-SPEED peer connection...')
       this.pc = new RTCPeerConnection(this.rtcConfig)
-      this.iceGatheringComplete = false
       
-      // Set up comprehensive event handlers
       this.pc.onicecandidate = (event) => {
         if (event.candidate) {
           console.log('🧊 Sending ICE candidate:', event.candidate.type)
@@ -393,7 +392,6 @@ export class BulletproofP2P {
           })
         } else {
           console.log('🧊 ICE gathering complete')
-          this.iceGatheringComplete = true
         }
       }
       
@@ -406,7 +404,8 @@ export class BulletproofP2P {
             this.connectionStatus = "connected"
             this.onConnectionStatusChange?.(this.connectionStatus)
             this.onConnectionRecovery?.()
-            console.log('✅ P2P Connection established successfully!')
+            console.log('✅ HIGH-SPEED P2P Connection established!')
+            this.processPendingFiles()
             break
           case 'connecting':
             console.log('🔄 P2P Connection in progress...')
@@ -432,16 +431,17 @@ export class BulletproofP2P {
       }
       
       this.pc.ondatachannel = (event) => {
-        console.log('📡 Data channel received from peer')
+        console.log('📡 HIGH-SPEED data channel received from peer')
         this.setupDataChannel(event.channel)
       }
       
-      // Create data channel with reliable settings (initiator only)
+      // Create HIGH-SPEED data channel (initiator only)
       if (this.isInitiator) {
-        console.log('📡 Creating reliable data channel...')
-        this.dataChannel = this.pc.createDataChannel('bulletproof-stable', {
-          ordered: true, // Ensure ordered delivery
-          maxRetransmits: 3, // Allow retransmits for reliability
+        console.log('📡 Creating HIGH-SPEED data channel...')
+        this.dataChannel = this.pc.createDataChannel('bulletproof-highspeed', {
+          ordered: false, // Unordered for maximum speed
+          maxRetransmits: 0, // No retransmits for speed
+          maxPacketLifeTime: 3000, // 3 second packet lifetime
         })
         this.setupDataChannel(this.dataChannel)
       }
@@ -474,19 +474,19 @@ export class BulletproofP2P {
   }
   
   private setupDataChannel(channel: RTCDataChannel): void {
-    console.log(`🔧 Setting up data channel: ${channel.label}`)
+    console.log(`🔧 Setting up HIGH-SPEED data channel: ${channel.label}`)
     this.dataChannel = channel
     
-    // Configure for file transfers
+    // Configure for HIGH-SPEED file transfers
     channel.binaryType = 'arraybuffer'
     
     channel.onopen = () => {
-      console.log('✅ Data channel opened successfully!')
+      console.log('✅ HIGH-SPEED Data channel opened!')
       console.log(`📊 Channel config: ordered=${channel.ordered}, maxRetransmits=${channel.maxRetransmits}`)
       this.connectionStatus = "connected"
       this.onConnectionStatusChange?.(this.connectionStatus)
       
-      // Process any pending files
+      // Process any pending files immediately
       this.processPendingFiles()
     }
     
@@ -533,6 +533,7 @@ export class BulletproofP2P {
             this.connectionStatus = "connected"
             this.onConnectionStatusChange?.(this.connectionStatus)
             console.log('✅ P2P Connection established!')
+            this.processPendingFiles()
           } else if (state === 'failed' || state === 'closed') {
             this.connectionStatus = "connecting"
             this.onConnectionStatusChange?.(this.connectionStatus)
@@ -658,56 +659,78 @@ export class BulletproofP2P {
     }
   }
   
-  // Public methods
+  // PUBLIC METHODS - OPTIMIZED FOR HIGH SPEED
   async sendFiles(files: File[]): Promise<void> {
-    if (!this.dataChannel || this.dataChannel.readyState !== 'open') {
-      console.log('⚠️ Data channel not ready, queuing files...')
-      // Queue files for when connection is ready
-      for (const file of files) {
-        const fileId = this.generateId()
-        this.pendingFiles.set(fileId, file)
-      }
-      this.onError?.('Connection not ready - files queued')
-      return
-    }
-    
-    console.log(`📤 Sending ${files.length} files`)
-    
+    console.log(`📤 Preparing to send ${files.length} files at HIGH SPEED`)
+
     for (const file of files) {
-      await this.sendSingleFile(file)
+      const fileId = this.generateId()
+      
+      console.log(`📤 Queuing file: ${file.name} (${Math.round(file.size/1024)}KB)`)
+      
+      // Store file immediately
+      this.pendingFiles.set(fileId, file)
+      
+      // Create transfer record
+      const transfer: FileTransfer = {
+        id: fileId,
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        progress: 0,
+        status: "pending",
+        direction: "sending",
+        speed: 0
+      }
+      
+      this.fileTransfers.set(fileId, transfer)
+      this.updateFileTransfers()
+      
+      // Pre-process file into chunks for HIGH SPEED
+      await this.preprocessFileForHighSpeed(file, fileId)
+      
+      // Send offer if connected, otherwise it will be sent when connection is ready
+      if (this.dataChannel && this.dataChannel.readyState === 'open') {
+        console.log(`📤 Sending file offer: ${file.name}`)
+        this.sendP2PMessage({
+          type: 'file-offer',
+          data: {
+            fileId,
+            fileName: file.name,
+            fileSize: file.size,
+            fileType: file.type
+          },
+          timestamp: Date.now(),
+          id: this.generateId()
+        })
+      } else {
+        console.log(`⚠️ Data channel not ready, file queued: ${file.name}`)
+      }
     }
   }
   
-  private async sendSingleFile(file: File): Promise<void> {
-    const fileId = this.generateId()
+  private async preprocessFileForHighSpeed(file: File, fileId: string): Promise<void> {
+    console.log(`🔧 Pre-processing file for HIGH SPEED: ${file.name}`)
     
-    console.log(`📤 Preparing to send: ${file.name} (${Math.round(file.size/1024)}KB)`)
+    const totalChunks = Math.ceil(file.size / this.chunkSize)
+    const chunks: ArrayBuffer[] = []
     
-    const transfer: FileTransfer = {
-      id: fileId,
-      name: file.name,
-      size: file.size,
-      type: file.type,
-      progress: 0,
-      status: "pending",
-      direction: "sending",
-      speed: 0
+    // Pre-read all chunks into memory for maximum speed
+    for (let i = 0; i < totalChunks; i++) {
+      const start = i * this.chunkSize
+      const end = Math.min(start + this.chunkSize, file.size)
+      const chunk = file.slice(start, end)
+      const arrayBuffer = await chunk.arrayBuffer()
+      chunks.push(arrayBuffer)
     }
     
-    this.fileTransfers.set(fileId, transfer)
-    this.updateFileTransfers()
+    console.log(`📊 File pre-processed: ${totalChunks} chunks of ${Math.round(this.chunkSize/1024)}KB each`)
     
-    // Send file offer
-    this.sendP2PMessage({
-      type: 'file-offer',
-      data: {
-        fileId,
-        fileName: file.name,
-        fileSize: file.size,
-        fileType: file.type
-      },
-      timestamp: Date.now(),
-      id: this.generateId()
+    // Store for HIGH SPEED sending
+    this.sendingFiles.set(fileId, {
+      file,
+      chunks,
+      totalChunks
     })
   }
   
@@ -716,11 +739,22 @@ export class BulletproofP2P {
     
     console.log(`📤 Processing ${this.pendingFiles.size} pending files...`)
     
-    const files = Array.from(this.pendingFiles.values())
-    this.pendingFiles.clear()
-    
-    for (const file of files) {
-      await this.sendSingleFile(file)
+    // Send offers for all pending files
+    for (const [fileId, file] of this.pendingFiles.entries()) {
+      if (this.dataChannel && this.dataChannel.readyState === 'open') {
+        console.log(`📤 Sending delayed file offer: ${file.name}`)
+        this.sendP2PMessage({
+          type: 'file-offer',
+          data: {
+            fileId,
+            fileName: file.name,
+            fileSize: file.size,
+            fileType: file.type
+          },
+          timestamp: Date.now(),
+          id: this.generateId()
+        })
+      }
     }
   }
   
@@ -742,85 +776,116 @@ export class BulletproofP2P {
     })
   }
   
-  private async sendFileInChunks(file: File, fileId: string): Promise<void> {
+  // HIGH SPEED FILE TRANSFER METHODS
+  private async sendFileAtHighSpeed(fileId: string): Promise<void> {
+    const sendingFile = this.sendingFiles.get(fileId)
     const transfer = this.fileTransfers.get(fileId)
-    if (!transfer) return
     
-    console.log(`🚀 Starting file transfer: ${file.name}`)
+    if (!sendingFile || !transfer) {
+      console.error(`❌ File data not found: ${fileId}`)
+      return
+    }
+
+    console.log(`🚀 Starting HIGH SPEED transfer: ${sendingFile.file.name}`)
     transfer.status = "transferring"
     this.updateFileTransfers()
-    
-    const totalChunks = Math.ceil(file.size / this.chunkSize)
+
+    const { file, chunks, totalChunks } = sendingFile
     const startTime = Date.now()
     let sentChunks = 0
-    
+
     try {
-      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+      // HIGH SPEED CONCURRENT SENDING
+      const sendChunkBatch = async (startIndex: number, batchSize: number) => {
+        const promises: Promise<void>[] = []
+        
+        for (let i = 0; i < batchSize && startIndex + i < totalChunks; i++) {
+          const chunkIndex = startIndex + i
+          promises.push(this.sendSingleChunk(fileId, chunkIndex, chunks[chunkIndex], file, totalChunks))
+        }
+        
+        await Promise.all(promises)
+        return Math.min(batchSize, totalChunks - startIndex)
+      }
+
+      // Send chunks in concurrent batches for maximum speed
+      while (sentChunks < totalChunks) {
         // Check if data channel is still open
         if (!this.dataChannel || this.dataChannel.readyState !== 'open') {
           throw new Error('Data channel closed during transfer')
         }
-        
+
         // Wait for buffer to clear if needed
-        while (this.dataChannel.bufferedAmount > 256 * 1024) { // 256KB buffer limit
-          await new Promise(resolve => setTimeout(resolve, 10))
+        while (this.dataChannel.bufferedAmount > this.maxBufferedAmount) {
+          await new Promise(resolve => setTimeout(resolve, 5))
         }
-        
-        const start = chunkIndex * this.chunkSize
-        const end = Math.min(start + this.chunkSize, file.size)
-        const chunk = file.slice(start, end)
-        const arrayBuffer = await chunk.arrayBuffer()
-        
-        // Create chunk header
-        const header = new TextEncoder().encode(JSON.stringify({
-          fileId,
-          chunkIndex,
-          totalChunks,
-          fileName: file.name,
-          fileSize: file.size,
-          fileType: file.type
-        }))
-        
-        // Combine header and data
-        const headerLength = new Uint32Array([header.length])
-        const combined = new Uint8Array(4 + header.length + arrayBuffer.byteLength)
-        combined.set(new Uint8Array(headerLength.buffer), 0)
-        combined.set(header, 4)
-        combined.set(new Uint8Array(arrayBuffer), 4 + header.length)
-        
-        // Send chunk
-        this.dataChannel.send(combined.buffer)
-        sentChunks++
-        
+
+        const batchSize = Math.min(this.concurrentChunks, totalChunks - sentChunks)
+        const chunksSent = await sendChunkBatch(sentChunks, batchSize)
+        sentChunks += chunksSent
+
         // Update progress
         transfer.progress = Math.round((sentChunks / totalChunks) * 100)
-        
+
         // Update speed
         const elapsed = (Date.now() - startTime) / 1000
         const bytesTransferred = sentChunks * this.chunkSize
         transfer.speed = Math.round(bytesTransferred / elapsed)
-        
+
         this.updateFileTransfers()
-        
-        // Small delay every few chunks to prevent overwhelming
-        if (chunkIndex % 5 === 0) {
-          await new Promise(resolve => setTimeout(resolve, 1))
+
+        // Log progress every 10%
+        if (transfer.progress % 10 === 0 && transfer.progress > 0) {
+          console.log(`📊 HIGH SPEED: ${file.name} ${transfer.progress}% (${Math.round(transfer.speed / 1024)} KB/s)`)
         }
+
+        // Small delay between batches
+        await new Promise(resolve => setTimeout(resolve, 1))
       }
-      
+
       // Mark as completed
       transfer.status = "completed"
       transfer.progress = 100
       this.updateFileTransfers()
-      
-      console.log(`✅ File sent successfully: ${file.name}`)
-      
+
+      // Cleanup
+      this.sendingFiles.delete(fileId)
+      this.pendingFiles.delete(fileId)
+
+      console.log(`✅ HIGH SPEED transfer completed: ${file.name}`)
+
     } catch (error) {
-      console.error(`❌ Failed to send file ${file.name}:`, error)
+      console.error(`❌ HIGH SPEED transfer failed ${file.name}:`, error)
       transfer.status = "error"
       this.updateFileTransfers()
       this.onError?.(`Failed to send ${file.name}`)
     }
+  }
+  
+  private async sendSingleChunk(fileId: string, chunkIndex: number, chunkData: ArrayBuffer, file: File, totalChunks: number): Promise<void> {
+    if (!this.dataChannel || this.dataChannel.readyState !== 'open') {
+      throw new Error('Data channel not available')
+    }
+
+    // Create chunk header
+    const header = new TextEncoder().encode(JSON.stringify({
+      fileId,
+      chunkIndex,
+      totalChunks,
+      fileName: file.name,
+      fileSize: file.size,
+      fileType: file.type
+    }))
+
+    // Combine header and data
+    const headerLength = new Uint32Array([header.length])
+    const combined = new Uint8Array(4 + header.length + chunkData.byteLength)
+    combined.set(new Uint8Array(headerLength.buffer), 0)
+    combined.set(header, 4)
+    combined.set(new Uint8Array(chunkData), 4 + header.length)
+
+    // Send chunk at HIGH SPEED
+    this.dataChannel.send(combined.buffer)
   }
   
   private handleFileChunk(data: ArrayBuffer): void {
@@ -835,7 +900,7 @@ export class BulletproofP2P {
       
       // Initialize incoming file if not exists
       if (!this.incomingFiles.has(fileId)) {
-        console.log(`📥 Starting to receive: ${fileName} (${totalChunks} chunks)`)
+        console.log(`📥 Starting HIGH SPEED receive: ${fileName} (${totalChunks} chunks)`)
         this.incomingFiles.set(fileId, {
           chunks: new Map(),
           totalChunks,
@@ -875,15 +940,15 @@ export class BulletproofP2P {
         
         this.updateFileTransfers()
         
-        // Log progress every 25%
-        if (transfer.progress % 25 === 0 && transfer.progress > 0) {
-          console.log(`📊 ${fileName}: ${transfer.progress}% (${Math.round(transfer.speed! / 1024)} KB/s)`)
+        // Log progress every 10%
+        if (transfer.progress % 10 === 0 && transfer.progress > 0) {
+          console.log(`📊 HIGH SPEED receive ${fileName}: ${transfer.progress}% (${Math.round(transfer.speed! / 1024)} KB/s)`)
         }
       }
       
       // Check if file is complete
       if (incomingFile.receivedChunks === totalChunks) {
-        console.log(`✅ All chunks received for ${fileName}`)
+        console.log(`✅ HIGH SPEED receive complete: ${fileName}`)
         this.assembleAndDownloadFile(fileId)
       }
       
@@ -899,7 +964,7 @@ export class BulletproofP2P {
     if (!incomingFile || !transfer) return
     
     try {
-      console.log(`🔧 Assembling file: ${incomingFile.fileName}`)
+      console.log(`🔧 Assembling HIGH SPEED file: ${incomingFile.fileName}`)
       
       // Verify all chunks are present
       const missingChunks: number[] = []
@@ -964,7 +1029,7 @@ export class BulletproofP2P {
       
       const elapsed = (Date.now() - incomingFile.startTime) / 1000
       const avgSpeed = Math.round(totalSize / elapsed / 1024)
-      console.log(`✅ File received: ${incomingFile.fileName} (${avgSpeed} KB/s average)`)
+      console.log(`✅ HIGH SPEED file received: ${incomingFile.fileName} (${avgSpeed} KB/s average)`)
       
     } catch (error) {
       console.error(`❌ Failed to assemble file:`, error)
@@ -975,50 +1040,38 @@ export class BulletproofP2P {
   }
   
   private handleFileOffer(data: FileOfferData): void {
-    console.log(`📥 File offer received: ${data.fileName} (${Math.round(data.fileSize/1024)}KB)`)
-    
-    // Auto-accept file
+    console.log(`📥 HIGH SPEED file offer: ${data.fileName} (${Math.round(data.fileSize/1024)}KB)`)
+
+    // Auto-accept file immediately
+    console.log(`✅ Auto-accepting HIGH SPEED file: ${data.fileName}`)
     this.sendP2PMessage({
       type: 'file-accept',
       data: { fileId: data.fileId },
       timestamp: Date.now(),
       id: this.generateId()
     })
-    
-    console.log(`✅ Auto-accepted file: ${data.fileName}`)
+
+    console.log(`📤 HIGH SPEED file acceptance sent: ${data.fileName}`)
   }
   
   private handleFileAccept(data: FileAcceptData): void {
-    console.log(`✅ File accepted: ${data.fileId}`)
-    
-    // Find the file and start sending
-    const transfer = this.fileTransfers.get(data.fileId)
-    if (transfer && transfer.direction === "sending") {
-      // Find the original file (we need to store it when creating the transfer)
-      const fileEntry = Array.from(this.pendingFiles.entries()).find(([id]) => id === data.fileId)
-      if (fileEntry) {
-        const [, file] = fileEntry
-        this.sendFileInChunks(file, data.fileId)
-        this.pendingFiles.delete(data.fileId)
-      } else {
-        // File might have been processed already, look for it in a different way
-        console.log('🔍 Looking for file to send...')
-        // For now, we'll need to modify the file sending logic to store files properly
-      }
-    }
+    console.log(`✅ HIGH SPEED file accepted: ${data.fileId}`)
+
+    // Start HIGH SPEED transfer immediately
+    this.sendFileAtHighSpeed(data.fileId)
   }
   
   private handleFileComplete(data: FileCompleteData): void {
-    console.log(`✅ File transfer completed: ${data.fileId}`)
+    console.log(`✅ HIGH SPEED file transfer completed: ${data.fileId}`)
     
     const transfer = this.fileTransfers.get(data.fileId)
     if (transfer && transfer.direction === "sending") {
       if (data.success !== false) {
         transfer.status = "completed"
-        console.log(`📤 Sender confirmed: ${transfer.name} delivered successfully`)
+        console.log(`📤 HIGH SPEED sender confirmed: ${transfer.name} delivered`)
       } else {
         transfer.status = "error"
-        console.log(`📤 Sender notified: ${transfer.name} failed on receiver`)
+        console.log(`📤 HIGH SPEED sender notified: ${transfer.name} failed`)
       }
       this.updateFileTransfers()
     }
@@ -1089,7 +1142,6 @@ export class BulletproofP2P {
     
     this.connectionStatus = "connecting"
     this.onConnectionStatusChange?.(this.connectionStatus)
-    this.iceGatheringComplete = false
   }
   
   private getBrowserInfo(): string {
@@ -1130,6 +1182,7 @@ export class BulletproofP2P {
     this.fileTransfers.clear()
     this.incomingFiles.clear()
     this.pendingFiles.clear()
+    this.sendingFiles.clear()
     this.chatMessages = []
   }
 }
