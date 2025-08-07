@@ -113,43 +113,73 @@ export class BulletproofP2P {
   }
   
   private async connectToSignalingServer() {
-    // Try multiple WebSocket URLs in order
-    const wsUrls = [
-      // Production URLs - try HTTPS first, then HTTP
-      'wss://p2p-signaling-server.onrender.com',
-      'ws://p2p-signaling-server.onrender.com',
+    // Get the current domain to construct the WebSocket URL
+    const currentDomain = window.location.hostname
+    const isLocalhost = currentDomain === 'localhost' || currentDomain === '127.0.0.1'
+    const isVercel = currentDomain.includes('vercel.app')
+    
+    // Try multiple WebSocket URLs based on environment
+    const wsUrls = []
+    
+    if (isLocalhost) {
       // Local development
-      'ws://localhost:8080',
-      'ws://127.0.0.1:8080',
-    ]
+      wsUrls.push('ws://localhost:8080', 'ws://127.0.0.1:8080')
+    } else {
+      // Production - try multiple Render URLs and common patterns
+      wsUrls.push(
+        // Primary Render URL (replace with your actual Render service name)
+        'wss://p2p-signaling-server.onrender.com',
+        'wss://bulletproof-p2p-server.onrender.com',
+        'wss://p2p-file-share-server.onrender.com',
+        'wss://signaling-server.onrender.com',
+        // Try without SSL as fallback
+        'ws://p2p-signaling-server.onrender.com',
+        // Railway alternatives
+        'wss://p2p-signaling-server.up.railway.app',
+        // Heroku alternatives  
+        'wss://p2p-signaling-server.herokuapp.com'
+      )
+    }
+    
+    console.log(`🔍 Environment detected: ${isLocalhost ? 'localhost' : isVercel ? 'vercel' : 'production'}`)
+    console.log(`🔗 Will try ${wsUrls.length} WebSocket URLs`)
     
     let connected = false
     let lastError: any = null
     
-    for (const wsUrl of wsUrls) {
+    for (let i = 0; i < wsUrls.length; i++) {
+      const wsUrl = wsUrls[i]
       if (connected) break
       
       try {
-        console.log(`🔗 Attempting connection to: ${wsUrl}`)
+        console.log(`🔗 Attempt ${i + 1}/${wsUrls.length}: ${wsUrl}`)
         
         await new Promise<void>((resolve, reject) => {
           const ws = new WebSocket(wsUrl)
           let connectionTimeout: NodeJS.Timeout
+          let resolved = false
           
           const cleanup = () => {
             if (connectionTimeout) clearTimeout(connectionTimeout)
           }
           
-          // Set connection timeout
-          connectionTimeout = setTimeout(() => {
+          const resolveOnce = (success: boolean, error?: any) => {
+            if (resolved) return
+            resolved = true
             cleanup()
+            if (success) resolve()
+            else reject(error)
+          }
+          
+          // Set connection timeout - shorter for faster fallback
+          connectionTimeout = setTimeout(() => {
+            console.log(`⏰ Connection timeout for ${wsUrl}`)
             ws.close()
-            reject(new Error('Connection timeout'))
-          }, 10000) // 10 second timeout
+            resolveOnce(false, new Error('Connection timeout'))
+          }, 8000) // 8 second timeout
           
           ws.onopen = () => {
             console.log(`✅ Connected to signaling server: ${wsUrl}`)
-            cleanup()
             this.ws = ws
             connected = true
             this.signalingStatus = "connected"
@@ -159,7 +189,7 @@ export class BulletproofP2P {
             // Set up event handlers
             this.setupWebSocketHandlers()
             
-            // Join session
+            // Join session immediately
             this.sendSignalingMessage({
               type: 'join',
               sessionId: this.sessionId,
@@ -167,47 +197,65 @@ export class BulletproofP2P {
               clientInfo: {
                 isMobile: /Mobile|Android|iPhone|iPad/i.test(navigator.userAgent),
                 browser: this.getBrowserInfo(),
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                url: wsUrl
               }
             })
             
-            resolve()
+            resolveOnce(true)
           }
           
           ws.onerror = (error) => {
-            cleanup()
-            console.log(`❌ Failed to connect to ${wsUrl}:`, error)
+            console.log(`❌ WebSocket error for ${wsUrl}:`, error)
             lastError = error
-            reject(error)
+            resolveOnce(false, error)
           }
           
           ws.onclose = (event) => {
-            cleanup()
             if (!connected) {
-              console.log(`🔌 Connection to ${wsUrl} closed: ${event.code}`)
-              reject(new Error(`Connection closed: ${event.code}`))
+              console.log(`🔌 Connection to ${wsUrl} closed: ${event.code} ${event.reason}`)
+              resolveOnce(false, new Error(`Connection closed: ${event.code} ${event.reason}`))
             }
           }
         })
         
       } catch (error) {
-        console.log(`❌ Connection attempt failed for ${wsUrl}:`, error)
+        console.log(`❌ Connection attempt ${i + 1} failed for ${wsUrl}:`, error)
         lastError = error
+        
+        // Add small delay between attempts
+        if (i < wsUrls.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 1000))
+        }
         continue
       }
     }
     
     if (!connected) {
       console.error('❌ Failed to connect to any signaling server')
+      console.error('📋 Tried URLs:', wsUrls)
+      console.error('🔍 Last error:', lastError)
+      
       this.signalingStatus = "disconnected"
       this.onSignalingStatusChange?.(this.signalingStatus)
-      this.onError?.(`Failed to connect to signaling server. Last error: ${lastError?.message || 'Unknown error'}`)
+      
+      // Provide helpful error message
+      let errorMessage = 'Failed to connect to signaling server. '
+      if (lastError?.message?.includes('timeout')) {
+        errorMessage += 'Connection timed out. Please check if the server is running.'
+      } else if (lastError?.message?.includes('refused')) {
+        errorMessage += 'Connection refused. Server may be down.'
+      } else {
+        errorMessage += `Error: ${lastError?.message || 'Unknown error'}`
+      }
+      
+      this.onError?.(errorMessage)
       
       // Schedule reconnect
       if (this.reconnectAttempts < this.maxReconnectAttempts) {
         this.scheduleReconnect()
       }
-      throw new Error('Failed to connect to signaling server')
+      throw new Error(errorMessage)
     }
   }
 
@@ -241,7 +289,7 @@ export class BulletproofP2P {
   
   private scheduleReconnect() {
     this.reconnectAttempts++
-    const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1)
+    const delay = Math.min(this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1), 30000) // Max 30 seconds
     
     console.log(`🔄 Scheduling reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms`)
     
@@ -256,6 +304,10 @@ export class BulletproofP2P {
     console.log(`📨 Signaling message: ${message.type}`)
     
     switch (message.type) {
+      case 'connected':
+        console.log('✅ Server connection confirmed:', message.message)
+        break
+        
       case 'joined':
         this.isInitiator = message.isInitiator
         this.userCount = message.userCount
