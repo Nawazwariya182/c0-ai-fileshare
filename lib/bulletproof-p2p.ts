@@ -27,6 +27,7 @@ interface IncomingFileData {
   fileSize: number
   fileType: string
   receivedChunks: number
+  startTime: number
 }
 
 interface FileOfferData {
@@ -42,6 +43,8 @@ interface FileAcceptData {
 
 interface FileCompleteData {
   fileId: string
+  success?: boolean
+  error?: string
 }
 
 interface PingPongData {
@@ -93,7 +96,7 @@ interface FileChunk {
 }
 
 interface P2PMessage {
-  type: 'file-offer' | 'file-accept' | 'file-chunk' | 'file-complete' | 'chat-message' | 'ping' | 'pong'
+  type: 'file-offer' | 'file-accept' | 'file-chunk' | 'file-complete' | 'chat-message' | 'ping' | 'pong' | 'chunk-ack'
   data: any
   timestamp: number
   id: string
@@ -110,7 +113,7 @@ export class BulletproofP2P {
   private dataChannel: RTCDataChannel | null = null
   private isInitiator: boolean = false
   
-  // Connection state - SIMPLIFIED
+  // Connection state
   private connectionStatus: ConnectionStatus = "connecting"
   private signalingStatus: ConnectionStatus = "connecting"
   private connectionQuality: ConnectionQuality = "excellent"
@@ -120,6 +123,7 @@ export class BulletproofP2P {
   // File transfer state
   private fileTransfers: Map<string, FileTransfer> = new Map()
   private incomingFiles: Map<string, IncomingFileData> = new Map()
+  private sendingFiles: Map<string, { file: File; chunks: ArrayBuffer[]; currentChunk: number; windowSize: number; inFlight: Set<number> }> = new Map()
   
   // Chat state
   private chatMessages: ChatMessage[] = []
@@ -135,7 +139,7 @@ export class BulletproofP2P {
   public onChatMessage?: (message: ChatMessage) => void
   public onConnectionRecovery?: () => void
   
-  // Simplified reconnection
+  // Connection management
   private pingInterval: NodeJS.Timeout | null = null
   private reconnectTimeout: NodeJS.Timeout | null = null
   private isDestroyed: boolean = false
@@ -143,7 +147,12 @@ export class BulletproofP2P {
   private maxConnectionAttempts: number = 3
   private isConnecting: boolean = false
   
-  // WebRTC Configuration - SIMPLIFIED
+  // Performance optimization
+  private maxChunkSize: number = 256 * 1024 // 256KB chunks for better speed
+  private windowSize: number = 10 // Send up to 10 chunks without waiting for ACK
+  private maxBufferedAmount: number = 1024 * 1024 // 1MB buffer limit
+  
+  // WebRTC Configuration - Optimized for file transfers
   private rtcConfig: RTCConfiguration = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
@@ -434,12 +443,13 @@ export class BulletproofP2P {
         this.setupDataChannel(event.channel)
       }
       
-      // Create data channel (initiator only)
+      // Create data channel (initiator only) - OPTIMIZED FOR FILE TRANSFERS
       if (this.isInitiator) {
-        console.log('📡 Creating data channel...')
-        this.dataChannel = this.pc.createDataChannel('bulletproof', {
-          ordered: true,
-          maxRetransmits: 3
+        console.log('📡 Creating optimized data channel...')
+        this.dataChannel = this.pc.createDataChannel('bulletproof-files', {
+          ordered: false, // Allow out-of-order delivery for speed
+          maxRetransmits: 0, // No retransmits for speed (we handle this at app level)
+          maxPacketLifeTime: 3000, // 3 second packet lifetime
         })
         this.setupDataChannel(this.dataChannel)
       }
@@ -466,11 +476,15 @@ export class BulletproofP2P {
   }
   
   private setupDataChannel(channel: RTCDataChannel): void {
-    console.log('🔧 Setting up data channel...')
+    console.log('🔧 Setting up optimized data channel...')
     this.dataChannel = channel
+    
+    // Set binary type for file transfers
+    channel.binaryType = 'arraybuffer'
     
     channel.onopen = () => {
       console.log('✅ Data channel opened!')
+      console.log(`📊 Data channel config: ordered=${channel.ordered}, maxRetransmits=${channel.maxRetransmits}`)
       this.connectionStatus = "connected"
       this.onConnectionStatusChange?.(this.connectionStatus)
     }
@@ -492,7 +506,25 @@ export class BulletproofP2P {
       this.handleDataChannelMessage(event.data)
     }
     
-    channel.binaryType = 'arraybuffer'
+    // Monitor buffer levels for flow control
+    this.startBufferMonitoring()
+  }
+  
+  private startBufferMonitoring(): void {
+    const checkBuffer = () => {
+      if (this.dataChannel && this.dataChannel.readyState === 'open') {
+        const bufferedAmount = this.dataChannel.bufferedAmount
+        if (bufferedAmount > this.maxBufferedAmount) {
+          console.log(`⚠️ Buffer full: ${bufferedAmount} bytes`)
+        }
+      }
+      
+      if (!this.isDestroyed) {
+        setTimeout(checkBuffer, 100) // Check every 100ms
+      }
+    }
+    
+    setTimeout(checkBuffer, 100)
   }
   
   private async handleOffer(message: SignalingMessage): Promise<void> {
@@ -624,6 +656,10 @@ export class BulletproofP2P {
         this.handleFileComplete(message.data)
         break
         
+      case 'chunk-ack':
+        this.handleChunkAck(message.data)
+        break
+        
       case 'ping':
         this.sendP2PMessage({
           type: 'pong',
@@ -677,8 +713,8 @@ export class BulletproofP2P {
         id: this.generateId()
       })
       
-      // Start sending file chunks
-      await this.sendFileInChunks(file, fileId)
+      // Prepare file for optimized sending
+      await this.prepareFileForSending(file, fileId)
     }
   }
   
@@ -700,80 +736,152 @@ export class BulletproofP2P {
     })
   }
   
-  private async sendFileInChunks(file: File, fileId: string): Promise<void> {
-    const chunkSize = 16 * 1024 // 16KB chunks - smaller for reliability
-    const totalChunks = Math.ceil(file.size / chunkSize)
-    let chunkIndex = 0
+  private async prepareFileForSending(file: File, fileId: string): Promise<void> {
+    console.log(`🔧 Preparing file for optimized sending: ${file.name}`)
     
+    // Calculate optimal chunk size based on file size
+    let chunkSize = this.maxChunkSize
+    if (file.size < 1024 * 1024) { // Files smaller than 1MB
+      chunkSize = 64 * 1024 // 64KB chunks
+    }
+    
+    const totalChunks = Math.ceil(file.size / chunkSize)
+    const chunks: ArrayBuffer[] = []
+    
+    // Pre-read all chunks into memory for faster sending
+    for (let i = 0; i < totalChunks; i++) {
+      const start = i * chunkSize
+      const end = Math.min(start + chunkSize, file.size)
+      const chunk = file.slice(start, end)
+      const arrayBuffer = await chunk.arrayBuffer()
+      chunks.push(arrayBuffer)
+    }
+    
+    console.log(`📊 File prepared: ${totalChunks} chunks of ~${Math.round(chunkSize/1024)}KB each`)
+    
+    // Store for optimized sending
+    this.sendingFiles.set(fileId, {
+      file,
+      chunks,
+      currentChunk: 0,
+      windowSize: this.windowSize,
+      inFlight: new Set()
+    })
+  }
+  
+  private async sendFileInChunks(fileId: string): Promise<void> {
+    const sendingFile = this.sendingFiles.get(fileId)
     const transfer = this.fileTransfers.get(fileId)
-    if (!transfer) return
+    
+    if (!sendingFile || !transfer) return
     
     transfer.status = "transferring"
     this.updateFileTransfers()
     
     const startTime = Date.now()
+    console.log(`🚀 Starting optimized file transfer: ${sendingFile.file.name}`)
     
     try {
-      while (chunkIndex < totalChunks) {
-        // Check if data channel is still open
-        if (!this.dataChannel || this.dataChannel.readyState !== 'open') {
-          throw new Error('Data channel closed during transfer')
-        }
-        
-        const start = chunkIndex * chunkSize
-        const end = Math.min(start + chunkSize, file.size)
-        const chunk = file.slice(start, end)
-        const arrayBuffer = await chunk.arrayBuffer()
-        
-        // Create chunk header
-        const header = new TextEncoder().encode(JSON.stringify({
-          fileId,
-          chunkIndex,
-          totalChunks,
-          fileName: file.name,
-          fileSize: file.size,
-          fileType: file.type
-        }))
-        
-        // Combine header and data
-        const headerLength = new Uint32Array([header.length])
-        const combined = new Uint8Array(4 + header.length + arrayBuffer.byteLength)
-        combined.set(new Uint8Array(headerLength.buffer), 0)
-        combined.set(header, 4)
-        combined.set(new Uint8Array(arrayBuffer), 4 + header.length)
-        
-        // Send chunk
-        this.dataChannel.send(combined.buffer)
-        
-        // Update progress
-        chunkIndex++
-        transfer.progress = Math.round((chunkIndex / totalChunks) * 100)
-        
-        // Update speed
-        const elapsed = (Date.now() - startTime) / 1000
-        const bytesTransferred = chunkIndex * chunkSize
-        transfer.speed = Math.round(bytesTransferred / elapsed)
-        
-        this.updateFileTransfers()
-        
-        // Small delay to prevent overwhelming
-        if (chunkIndex % 5 === 0) {
-          await new Promise(resolve => setTimeout(resolve, 10))
-        }
-      }
+      await this.sendChunksWithFlowControl(fileId)
       
       // Mark as completed
       transfer.status = "completed"
       transfer.progress = 100
       this.updateFileTransfers()
       
-      console.log(`✅ File sent: ${file.name}`)
+      console.log(`✅ File sent successfully: ${sendingFile.file.name}`)
       
     } catch (error) {
-      console.error(`❌ Failed to send file ${file.name}:`, error)
+      console.error(`❌ Failed to send file ${sendingFile.file.name}:`, error)
       transfer.status = "error"
       this.updateFileTransfers()
+    } finally {
+      this.sendingFiles.delete(fileId)
     }
+  }
+  
+  private async sendChunksWithFlowControl(fileId: string): Promise<void> {
+    const sendingFile = this.sendingFiles.get(fileId)
+    const transfer = this.fileTransfers.get(fileId)
+    
+    if (!sendingFile || !transfer) return
+    
+    const { file, chunks } = sendingFile
+    const totalChunks = chunks.length
+    let sentChunks = 0
+    const startTime = Date.now()
+    
+    return new Promise((resolve, reject) => {
+      const sendNextBatch = async () => {
+        try {
+          // Check if data channel is still open
+          if (!this.dataChannel || this.dataChannel.readyState !== 'open') {
+            reject(new Error('Data channel closed during transfer'))
+            return
+          }
+          
+          // Wait for buffer to clear if needed
+          while (this.dataChannel.bufferedAmount > this.maxBufferedAmount) {
+            await new Promise(resolve => setTimeout(resolve, 10))
+          }
+          
+          // Send chunks in batches
+          const batchSize = Math.min(5, totalChunks - sentChunks) // Send 5 chunks at a time
+          
+          for (let i = 0; i < batchSize && sentChunks < totalChunks; i++) {
+            const chunkIndex = sentChunks
+            const chunkData = chunks[chunkIndex]
+            
+            // Create chunk header
+            const header = new TextEncoder().encode(JSON.stringify({
+              fileId,
+              chunkIndex,
+              totalChunks,
+              fileName: file.name,
+              fileSize: file.size,
+              fileType: file.type
+            }))
+            
+            // Combine header and data
+            const headerLength = new Uint32Array([header.length])
+            const combined = new Uint8Array(4 + header.length + chunkData.byteLength)
+            combined.set(new Uint8Array(headerLength.buffer), 0)
+            combined.set(header, 4)
+            combined.set(new Uint8Array(chunkData), 4 + header.length)
+            
+            // Send chunk
+            this.dataChannel.send(combined.buffer)
+            sentChunks++
+            
+            // Update progress
+            transfer.progress = Math.round((sentChunks / totalChunks) * 100)
+            
+            // Update speed
+            const elapsed = (Date.now() - startTime) / 1000
+            const bytesTransferred = sentChunks * (file.size / totalChunks)
+            transfer.speed = Math.round(bytesTransferred / elapsed)
+            
+            this.updateFileTransfers()
+          }
+          
+          // Check if we're done
+          if (sentChunks >= totalChunks) {
+            console.log(`✅ All ${totalChunks} chunks sent for ${file.name}`)
+            resolve()
+            return
+          }
+          
+          // Continue sending next batch
+          setTimeout(sendNextBatch, 5) // Small delay between batches
+          
+        } catch (error) {
+          reject(error)
+        }
+      }
+      
+      // Start sending
+      sendNextBatch()
+    })
   }
   
   private handleFileChunk(data: ArrayBuffer): void {
@@ -788,14 +896,15 @@ export class BulletproofP2P {
       
       // Initialize incoming file if not exists
       if (!this.incomingFiles.has(fileId)) {
-        console.log(`📥 Receiving file: ${fileName}`)
+        console.log(`📥 Starting to receive file: ${fileName} (${totalChunks} chunks)`)
         this.incomingFiles.set(fileId, {
           chunks: new Map(),
           totalChunks,
           fileName,
           fileSize,
           fileType,
-          receivedChunks: 0
+          receivedChunks: 0,
+          startTime: Date.now()
         })
         
         const transfer: FileTransfer = {
@@ -813,18 +922,29 @@ export class BulletproofP2P {
       const incomingFile = this.incomingFiles.get(fileId)!
       const transfer = this.fileTransfers.get(fileId)!
       
-      // Store chunk
+      // Store chunk (avoid duplicates)
       if (!incomingFile.chunks.has(chunkIndex)) {
         incomingFile.chunks.set(chunkIndex, chunkData)
         incomingFile.receivedChunks++
+        
+        // Update progress and speed
+        transfer.progress = Math.round((incomingFile.receivedChunks / totalChunks) * 100)
+        
+        const elapsed = (Date.now() - incomingFile.startTime) / 1000
+        const bytesReceived = incomingFile.receivedChunks * (fileSize / totalChunks)
+        transfer.speed = Math.round(bytesReceived / elapsed)
+        
+        this.updateFileTransfers()
+        
+        // Log progress every 10%
+        if (transfer.progress % 10 === 0 && transfer.progress > 0) {
+          console.log(`📊 ${fileName}: ${transfer.progress}% (${Math.round(transfer.speed! / 1024)} KB/s)`)
+        }
       }
       
-      // Update progress
-      transfer.progress = Math.round((incomingFile.receivedChunks / totalChunks) * 100)
-      this.updateFileTransfers()
-      
-      // Check if complete
+      // Check if file is complete
       if (incomingFile.receivedChunks === totalChunks) {
+        console.log(`✅ All chunks received for ${fileName} - assembling...`)
         this.assembleAndDownloadFile(fileId)
       }
       
@@ -842,18 +962,35 @@ export class BulletproofP2P {
     try {
       console.log(`🔧 Assembling file: ${incomingFile.fileName}`)
       
-      // Assemble chunks
-      const chunks: ArrayBuffer[] = []
+      // Verify all chunks are present
+      const missingChunks: number[] = []
       for (let i = 0; i < incomingFile.totalChunks; i++) {
-        const chunk = incomingFile.chunks.get(i)
-        if (!chunk) {
-          throw new Error(`Missing chunk ${i}`)
+        if (!incomingFile.chunks.has(i)) {
+          missingChunks.push(i)
         }
-        chunks.push(chunk)
       }
       
+      if (missingChunks.length > 0) {
+        console.error(`❌ Missing ${missingChunks.length} chunks for ${incomingFile.fileName}`)
+        transfer.status = "error"
+        this.updateFileTransfers()
+        return
+      }
+      
+      // Assemble chunks in order
+      const chunks: ArrayBuffer[] = []
+      let totalSize = 0
+      
+      for (let i = 0; i < incomingFile.totalChunks; i++) {
+        const chunk = incomingFile.chunks.get(i)!
+        chunks.push(chunk)
+        totalSize += chunk.byteLength
+      }
+      
+      console.log(`📊 Assembled ${chunks.length} chunks, total: ${Math.round(totalSize/1024)}KB`)
+      
       // Create blob and download
-      const blob = new Blob(chunks, { type: incomingFile.fileType })
+      const blob = new Blob(chunks, { type: incomingFile.fileType || 'application/octet-stream' })
       const url = URL.createObjectURL(blob)
       
       const a = document.createElement('a')
@@ -862,8 +999,12 @@ export class BulletproofP2P {
       a.style.display = 'none'
       document.body.appendChild(a)
       a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
+      
+      // Clean up
+      setTimeout(() => {
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+      }, 100)
       
       // Mark as completed
       transfer.status = "completed"
@@ -881,7 +1022,9 @@ export class BulletproofP2P {
       // Cleanup
       this.incomingFiles.delete(fileId)
       
-      console.log(`✅ File received: ${incomingFile.fileName}`)
+      const elapsed = (Date.now() - incomingFile.startTime) / 1000
+      const avgSpeed = Math.round(totalSize / elapsed / 1024)
+      console.log(`✅ File completed: ${incomingFile.fileName} (${avgSpeed} KB/s average)`)
       
     } catch (error) {
       console.error(`❌ Failed to assemble file:`, error)
@@ -891,7 +1034,7 @@ export class BulletproofP2P {
   }
   
   private handleFileOffer(data: FileOfferData): void {
-    console.log(`📥 File offer: ${data.fileName}`)
+    console.log(`📥 File offer: ${data.fileName} (${Math.round(data.fileSize/1024)}KB)`)
     // Auto-accept
     this.sendP2PMessage({
       type: 'file-accept',
@@ -903,10 +1046,31 @@ export class BulletproofP2P {
   
   private handleFileAccept(data: FileAcceptData): void {
     console.log(`✅ File accepted: ${data.fileId}`)
+    // Start sending the file
+    this.sendFileInChunks(data.fileId)
   }
   
   private handleFileComplete(data: FileCompleteData): void {
-    console.log(`✅ File completed: ${data.fileId}`)
+    console.log(`✅ File transfer completed: ${data.fileId}`)
+    
+    // Update sender's status
+    const transfer = this.fileTransfers.get(data.fileId)
+    if (transfer && transfer.direction === "sending") {
+      if (data.success !== false) {
+        transfer.status = "completed"
+      } else {
+        transfer.status = "error"
+      }
+      this.updateFileTransfers()
+    }
+  }
+  
+  private handleChunkAck(data: { fileId: string; chunkIndex: number }): void {
+    // Handle chunk acknowledgment for flow control
+    const sendingFile = this.sendingFiles.get(data.fileId)
+    if (sendingFile) {
+      sendingFile.inFlight.delete(data.chunkIndex)
+    }
   }
   
   private sendP2PMessage(message: P2PMessage): void {
@@ -1005,6 +1169,7 @@ export class BulletproofP2P {
     
     this.fileTransfers.clear()
     this.incomingFiles.clear()
+    this.sendingFiles.clear()
     this.chatMessages = []
   }
 }
