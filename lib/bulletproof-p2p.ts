@@ -118,23 +118,52 @@ export class BulletproofP2P {
   private connectionAttempts: number = 0
   private isConnecting: boolean = false
   private negotiationNeededQueue: boolean = false; // To prevent multiple negotiations
+  private iceCandidatesQueue: RTCIceCandidate[] = []; // Queue for ICE candidates received before remote description is set
   
   // HIGH SPEED OPTIMIZED SETTINGS
   private chunkSize: number = 256 * 1024 // 256KB chunks for maximum speed
   private maxBufferedAmount: number = 2 * 1024 * 1024 // 2MB buffer
   private concurrentChunks: number = 16 // Send 16 chunks concurrently
   
-  // WebRTC Configuration - OPTIMIZED FOR SPEED AND STABILITY
+  // WebRTC Configuration - OPTIMIZED FOR SPEED AND STABILITY WITH TURN SERVERS
   private rtcConfig: RTCConfiguration = {
     iceServers: [
+      // Google STUN servers
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
       { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun3.l.google.com:19302' },
+      { urls: 'stun:stun4.l.google.com:19302' },
+      // Mozilla STUN server
       { urls: 'stun:stun.services.mozilla.com' },
-      { urls: 'stun:stun.stunprotocol.org' },
-      { urls: 'stun:stun.voipbuster.com' },
+      // Twilio STUN/TURN servers (free tier, rate-limited, for testing)
+      {
+        urls: [
+          'stun:global.stun.twilio.com:3478?transport=udp',
+          'turn:global.turn.twilio.com:3478?transport=udp',
+          'turn:global.turn.twilio.com:3478?transport=tcp',
+        ],
+        username: 'testuser', // Replace with actual credentials for production
+        credential: 'testpassword' // Replace with actual credentials for production
+      },
+      // Xirsys STUN/TURN (requires account for production)
+      // {
+      //   urls: 'stun:stun.xirsys.com:80',
+      //   username: 'YOUR_XIRSYS_USERNAME',
+      //   credential: 'YOUR_XIRSYS_PASSWORD'
+      // },
+      // {
+      //   urls: 'turn:turn.xirsys.com:80?transport=udp',
+      //   username: 'YOUR_XIRSYS_USERNAME',
+      //   credential: 'YOUR_XIRSYS_PASSWORD'
+      // },
+      // {
+      //   urls: 'turn:turn.xirsys.com:80?transport=tcp',
+      //   username: 'YOUR_XIRSYS_USERNAME',
+      //   credential: 'YOUR_XIRSYS_PASSWORD'
+      // }
     ],
-    iceCandidatePoolSize: 10,
+    iceCandidatePoolSize: 10, // Increase pool size for faster candidate gathering
     bundlePolicy: 'max-bundle',
     rtcpMuxPolicy: 'require',
   }
@@ -254,6 +283,7 @@ export class BulletproofP2P {
       'wss://signaling-server-1ckx.onrender.com',
       'wss://p2p-signaling-server.onrender.com',
       'wss://webrtc-signaling-server.onrender.com', // Added another potential server
+      'wss://your-production-signaling-server.com' // Placeholder for your own production server
     ]
   }
   
@@ -384,10 +414,11 @@ export class BulletproofP2P {
       console.log('🔧 Creating HIGH-SPEED peer connection...')
       this.pc = new RTCPeerConnection(this.rtcConfig)
       this.negotiationNeededQueue = false; // Reset negotiation queue
+      this.iceCandidatesQueue = []; // Clear ICE candidate queue
       
       this.pc.onicecandidate = (event) => {
         if (event.candidate) {
-          console.log('🧊 Sending ICE candidate:', event.candidate.type, event.candidate.protocol);
+          console.log('🧊 Sending ICE candidate:', event.candidate.type, event.candidate.protocol, event.candidate.address);
           this.sendSignalingMessage({
             type: 'ice-candidate',
             candidate: event.candidate,
@@ -430,9 +461,8 @@ export class BulletproofP2P {
         console.log(`🧊 ICE Connection state: ${state}`);
         if (state === 'failed' || state === 'disconnected') {
           console.log('❌ ICE connection failed/disconnected - attempting ICE restart');
-          // This might trigger onnegotiationneeded, which will handle the restart
           if (this.pc && this.pc.connectionState !== 'closed') {
-            this.pc.restartIce();
+            this.pc.restartIce(); // Force ICE restart
           }
         }
       };
@@ -476,12 +506,6 @@ export class BulletproofP2P {
           maxPacketLifeTime: 3000, // 3 second packet lifetime
         });
         this.setupDataChannel(this.dataChannel);
-      }
-      
-      // If initiator, and data channel is created, trigger initial offer
-      if (this.isInitiator && this.dataChannel) {
-        // The onnegotiationneeded event will handle creating and sending the offer
-        // No need to explicitly call createOffer here if onnegotiationneeded is reliable
       }
       
     } catch (error) {
@@ -536,10 +560,11 @@ export class BulletproofP2P {
       if (!this.pc) {
         console.log('🔧 Creating peer connection for answer...')
         this.pc = new RTCPeerConnection(this.rtcConfig)
+        this.iceCandidatesQueue = []; // Clear ICE candidate queue for new PC
         
         this.pc.onicecandidate = (event) => {
           if (event.candidate) {
-            console.log('🧊 Sending ICE candidate:', event.candidate.type, event.candidate.protocol)
+            console.log('🧊 Sending ICE candidate:', event.candidate.type, event.candidate.protocol, event.candidate.address)
             this.sendSignalingMessage({
               type: 'ice-candidate',
               candidate: event.candidate,
@@ -597,23 +622,34 @@ export class BulletproofP2P {
         throw new Error('No offer in message')
       }
       
-      console.log('📥 Setting remote description from offer...')
-      await this.pc.setRemoteDescription(message.offer)
+      console.log('📥 Setting remote description from offer...');
+      // Log SDP for debugging
+      console.log('SDP Offer:', message.offer.sdp);
+      await this.pc.setRemoteDescription(message.offer);
+      console.log('✅ Remote description set.');
+
+      // Process any queued ICE candidates after setting remote description
+      this.iceCandidatesQueue.forEach(candidate => {
+        this.pc?.addIceCandidate(candidate).catch(e => console.error('Error adding queued ICE candidate:', e));
+      });
+      this.iceCandidatesQueue = []; // Clear queue
+
+      console.log('📤 Creating answer...');
+      const answer = await this.pc.createAnswer();
       
-      console.log('📤 Creating answer...')
-      const answer = await this.pc.createAnswer()
+      console.log('📤 Setting local description...');
+      // Log SDP for debugging
+      console.log('SDP Answer:', answer.sdp);
+      await this.pc.setLocalDescription(answer);
       
-      console.log('📤 Setting local description...')
-      await this.pc.setLocalDescription(answer)
-      
-      console.log('📤 Sending answer...')
+      console.log('📤 Sending answer...');
       this.sendSignalingMessage({
         type: 'answer',
         answer: answer,
         sessionId: this.sessionId
-      })
+      });
       
-      console.log('✅ Answer sent successfully')
+      console.log('✅ Answer sent successfully');
       
     } catch (error) {
       console.error('❌ Failed to handle offer:', error)
@@ -627,9 +663,17 @@ export class BulletproofP2P {
       console.log('📥 Handling answer...')
       
       if (this.pc && message.answer) {
-        console.log('📥 Setting remote description from answer...')
-        await this.pc.setRemoteDescription(message.answer)
-        console.log('✅ Answer processed successfully')
+        console.log('📥 Setting remote description from answer...');
+        // Log SDP for debugging
+        console.log('SDP Answer:', message.answer.sdp);
+        await this.pc.setRemoteDescription(message.answer);
+        console.log('✅ Answer processed successfully');
+
+        // Process any queued ICE candidates after setting remote description
+        this.iceCandidatesQueue.forEach(candidate => {
+          this.pc?.addIceCandidate(candidate).catch(e => console.error('Error adding queued ICE candidate:', e));
+        });
+        this.iceCandidatesQueue = []; // Clear queue
       } else {
         console.warn('⚠️ No peer connection or answer data to handle.')
       }
@@ -642,15 +686,14 @@ export class BulletproofP2P {
   private async handleIceCandidate(message: SignalingMessage): Promise<void> {
     try {
       if (this.pc && message.candidate) {
-        console.log('🧊 Adding ICE candidate:', message.candidate.candidate)
-        // Ensure the peer connection is in a state to add candidates
+        console.log('🧊 Received ICE candidate:', message.candidate.candidate);
+        // Only add candidate if remote description is already set
         if (this.pc.remoteDescription) {
-          await this.pc.addIceCandidate(new RTCIceCandidate(message.candidate))
-          console.log('✅ ICE candidate added')
+          await this.pc.addIceCandidate(new RTCIceCandidate(message.candidate));
+          console.log('✅ ICE candidate added.');
         } else {
-          console.warn('⚠️ Cannot add ICE candidate, remote description not set yet.')
-          // Queue candidates if remote description is not set yet
-          // (This is a simplified approach, a real-world app might queue and retry)
+          console.warn('⚠️ Remote description not set yet, queuing ICE candidate.');
+          this.iceCandidatesQueue.push(new RTCIceCandidate(message.candidate));
         }
       }
     } catch (error) {
@@ -1213,6 +1256,7 @@ export class BulletproofP2P {
     this.connectionStatus = "connecting"
     this.onConnectionStatusChange?.(this.connectionStatus)
     this.negotiationNeededQueue = false; // Reset queue on full reset
+    this.iceCandidatesQueue = []; // Clear ICE candidate queue on full reset
     
     // Attempt to re-initiate connection after a short delay
     if (!this.isDestroyed && this.userCount === 2) { // Only re-init if both users are still in session
