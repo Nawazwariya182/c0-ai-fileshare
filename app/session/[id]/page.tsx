@@ -363,7 +363,7 @@ export default function SessionPage() {
                     />
                   </div>
                   <p className="text-xs md:text-sm font-bold mt-4 text-gray-600">
-                    Max 1GB per file • Multi-file support • Bulletproof transfer
+                    Max 100MB per file • Multi-file support • Bulletproof transfer
                   </p>
                 </div>
               </CardContent>
