@@ -113,32 +113,106 @@ export class BulletproofP2P {
   }
   
   private async connectToSignalingServer() {
-    const wsUrl = process.env.NODE_ENV === 'production' 
-      ? 'wss://p2p-signaling-server.onrender.com'
-      : 'ws://localhost:8080'
+    // Try multiple WebSocket URLs in order
+    const wsUrls = [
+      // Production URLs - try HTTPS first, then HTTP
+      'wss://p2p-signaling-server.onrender.com',
+      'ws://p2p-signaling-server.onrender.com',
+      // Local development
+      'ws://localhost:8080',
+      'ws://127.0.0.1:8080',
+    ]
     
-    console.log(`🔗 Connecting to signaling server: ${wsUrl}`)
+    let connected = false
+    let lastError: any = null
     
-    this.ws = new WebSocket(wsUrl)
-    
-    this.ws.onopen = () => {
-      console.log('✅ Signaling server connected')
-      this.signalingStatus = "connected"
-      this.onSignalingStatusChange?.(this.signalingStatus)
-      this.reconnectAttempts = 0
+    for (const wsUrl of wsUrls) {
+      if (connected) break
       
-      // Join session
-      this.sendSignalingMessage({
-        type: 'join',
-        sessionId: this.sessionId,
-        userId: this.userId,
-        clientInfo: {
-          isMobile: /Mobile|Android|iPhone|iPad/i.test(navigator.userAgent),
-          browser: this.getBrowserInfo(),
-          timestamp: Date.now()
-        }
-      })
+      try {
+        console.log(`🔗 Attempting connection to: ${wsUrl}`)
+        
+        await new Promise<void>((resolve, reject) => {
+          const ws = new WebSocket(wsUrl)
+          let connectionTimeout: NodeJS.Timeout
+          
+          const cleanup = () => {
+            if (connectionTimeout) clearTimeout(connectionTimeout)
+          }
+          
+          // Set connection timeout
+          connectionTimeout = setTimeout(() => {
+            cleanup()
+            ws.close()
+            reject(new Error('Connection timeout'))
+          }, 10000) // 10 second timeout
+          
+          ws.onopen = () => {
+            console.log(`✅ Connected to signaling server: ${wsUrl}`)
+            cleanup()
+            this.ws = ws
+            connected = true
+            this.signalingStatus = "connected"
+            this.onSignalingStatusChange?.(this.signalingStatus)
+            this.reconnectAttempts = 0
+            
+            // Set up event handlers
+            this.setupWebSocketHandlers()
+            
+            // Join session
+            this.sendSignalingMessage({
+              type: 'join',
+              sessionId: this.sessionId,
+              userId: this.userId,
+              clientInfo: {
+                isMobile: /Mobile|Android|iPhone|iPad/i.test(navigator.userAgent),
+                browser: this.getBrowserInfo(),
+                timestamp: Date.now()
+              }
+            })
+            
+            resolve()
+          }
+          
+          ws.onerror = (error) => {
+            cleanup()
+            console.log(`❌ Failed to connect to ${wsUrl}:`, error)
+            lastError = error
+            reject(error)
+          }
+          
+          ws.onclose = (event) => {
+            cleanup()
+            if (!connected) {
+              console.log(`🔌 Connection to ${wsUrl} closed: ${event.code}`)
+              reject(new Error(`Connection closed: ${event.code}`))
+            }
+          }
+        })
+        
+      } catch (error) {
+        console.log(`❌ Connection attempt failed for ${wsUrl}:`, error)
+        lastError = error
+        continue
+      }
     }
+    
+    if (!connected) {
+      console.error('❌ Failed to connect to any signaling server')
+      this.signalingStatus = "disconnected"
+      this.onSignalingStatusChange?.(this.signalingStatus)
+      this.onError?.(`Failed to connect to signaling server. Last error: ${lastError?.message || 'Unknown error'}`)
+      
+      // Schedule reconnect
+      if (this.reconnectAttempts < this.maxReconnectAttempts) {
+        this.scheduleReconnect()
+      }
+      throw new Error('Failed to connect to signaling server')
+    }
+  }
+
+  private setupWebSocketHandlers() {
+    if (!this.ws) return
     
     this.ws.onmessage = (event) => {
       try {
