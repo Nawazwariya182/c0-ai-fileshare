@@ -9,9 +9,19 @@ export interface PreviewResult {
 export class FilePreviewGenerator {
   private static readonly MAX_TEXT_SIZE = 1024 * 1024 // 1MB
   private static readonly MAX_IMAGE_SIZE = 10 * 1024 * 1024 // 10MB
+  private static readonly MAX_FILE_SIZE = 100 * 1024 * 1024 // 100MB
 
   static async generatePreview(file: File): Promise<PreviewResult> {
     try {
+      // Check file size limit first
+      if (file.size > this.MAX_FILE_SIZE) {
+        return {
+          canPreview: false,
+          previewType: 'none',
+          error: `File too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum allowed: 100MB`
+        }
+      }
+
       const previewType = this.getPreviewType(file)
       
       if (previewType === 'none') {

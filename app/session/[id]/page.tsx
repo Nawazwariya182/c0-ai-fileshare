@@ -52,6 +52,7 @@ export default function SessionPage() {
   const [showPreview, setShowPreview] = useState(false)
   const [currentSpeed, setCurrentSpeed] = useState(0)
   const [connectionQuality, setConnectionQuality] = useState<"excellent" | "good" | "poor">("excellent")
+  const [fileError, setFileError] = useState("")
 
   // Simple refs
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -135,11 +136,29 @@ export default function SessionPage() {
     return () => window.removeEventListener("resize", checkMobile)
   }, [])
 
+  const MAX_FILE_SIZE = 100 * 1024 * 1024 // 100MB in bytes
+
+  const validateFiles = (files: File[]) => {
+    const oversizedFiles = files.filter(file => file.size > MAX_FILE_SIZE)
+    const validFiles = files.filter(file => file.size <= MAX_FILE_SIZE)
+    
+    if (oversizedFiles.length > 0) {
+      const fileNames = oversizedFiles.map(f => f.name).join(', ')
+      setFileError(`These files are too large (max 100MB): ${fileNames}`)
+      setTimeout(() => setFileError(""), 5000)
+    }
+    
+    return validFiles
+  }
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
     if (files.length > 0) {
-      setPreviewFiles(files)
-      setShowPreview(true)
+      const validFiles = validateFiles(files)
+      if (validFiles.length > 0) {
+        setPreviewFiles(validFiles)
+        setShowPreview(true)
+      }
     }
     e.target.value = ""
   }
@@ -175,8 +194,11 @@ export default function SessionPage() {
     setDragOver(false)
     const files = Array.from(e.dataTransfer.files)
     if (files.length > 0) {
-      setPreviewFiles(files)
-      setShowPreview(true)
+      const validFiles = validateFiles(files)
+      if (validFiles.length > 0) {
+        setPreviewFiles(validFiles)
+        setShowPreview(true)
+      }
     }
   }
 
@@ -279,12 +301,24 @@ export default function SessionPage() {
               {connectionQuality.toUpperCase()}
             </div>
 
-            <div className="flex items-center gap-1 md:gap-2 px-2 md:px-4 py-1 md:py-2 border-2 md:border-4 border-black font-black bg-purple-400 text-xs md:text-sm">
+            {/* <div className="flex items-center gap-1 md:gap-2 px-2 md:px-4 py-1 md:py-2 border-2 md:border-4 border-black font-black bg-purple-400 text-xs md:text-sm">
               {isMobile ? <Smartphone className="w-3 h-3" /> : <Monitor className="w-3 h-3" />}
               {getSpeedDisplay()}
-            </div>
+            </div> */}
           </div>
         </header>
+
+        {fileError && (
+          <Card className="neubrutalism-card bg-orange-300 mb-4 md:mb-6">
+            <CardContent className="p-3 md:p-4 flex items-center gap-2">
+              <AlertTriangle className="w-4 md:w-5 h-4 md:h-5 flex-shrink-0" />
+              <span className="font-bold flex-1 text-sm md:text-base">{fileError}</span>
+              <Button onClick={() => setFileError("")} variant="ghost" size="sm" className="touch-target">
+                <X className="w-4 h-4" />
+              </Button>
+            </CardContent>
+          </Card>
+        )}
 
         {error && (
           <Card className="neubrutalism-card bg-red-300 mb-4 md:mb-6">
@@ -424,7 +458,7 @@ export default function SessionPage() {
                         <p className="font-black text-base md:text-lg text-green-800">BULLETPROOF CONNECTION!</p>
                         <p className="font-bold text-sm md:text-base">Maximum stability • Zero packet loss</p>
                         <p className="text-xs md:text-sm mt-2">
-                          Quality: {connectionQuality} • Speed: {getSpeedDisplay()}
+                          Quality: {connectionQuality}
                         </p>
                       </div>
                     )}

@@ -48,6 +48,9 @@ export function FilePreviewModal({
   const [showSidebar, setShowSidebar] = useState(false) // Default to hidden on mobile
   const [isMobile, setIsMobile] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [fileSizeWarnings, setFileSizeWarnings] = useState<string[]>([])
+
+  const MAX_FILE_SIZE = 100 * 1024 * 1024 // 100MB in bytes
 
   // Detect mobile device
   useEffect(() => {
@@ -65,7 +68,20 @@ export function FilePreviewModal({
   // Initialize files with previews when modal opens
   useEffect(() => {
     if (files.length > 0 && isOpen) {
-      const newFilesWithPreviews = files.map((file) => ({
+      // Filter out oversized files and show warnings
+      const oversizedFiles = files.filter((file) => file.size > MAX_FILE_SIZE)
+      const validFiles = files.filter((file) => file.size <= MAX_FILE_SIZE)
+
+      if (oversizedFiles.length > 0) {
+        const warnings = oversizedFiles.map((file) =>
+          `${file.name} (${(file.size / 1024 / 1024).toFixed(1)}MB) exceeds 100MB limit`,
+        )
+        setFileSizeWarnings(warnings)
+      } else {
+        setFileSizeWarnings([])
+      }
+
+      const newFilesWithPreviews = validFiles.map((file) => ({
         file,
         preview: null,
         loading: true,
@@ -75,11 +91,11 @@ export function FilePreviewModal({
       setFilesWithPreviews(newFilesWithPreviews)
       setCurrentFileIndex(0)
 
-      // Select all files by default
+      // Select all valid files by default
       const allIds = new Set(newFilesWithPreviews.map((f) => f.id))
       setSelectedFiles(allIds)
 
-      // Generate previews for all files
+      // Generate previews for all valid files
       newFilesWithPreviews.forEach((fileWithPreview, index) => {
         generatePreview(fileWithPreview.file, index)
       })
@@ -227,6 +243,23 @@ export function FilePreviewModal({
               </Button>
             </div>
           </div>
+
+          {/* File Size Warnings */}
+          {fileSizeWarnings.length > 0 && (
+            <div className="mt-3 p-2 bg-red-100 border-2 border-red-400 rounded">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="font-bold text-red-800 text-sm">Files excluded (over 100MB limit):</p>
+                  <ul className="text-xs text-red-700 mt-1 space-y-1">
+                    {fileSizeWarnings.map((warning, index) => (
+                      <li key={index}>• {warning}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
         </CardHeader>
 
         {/* Main Content Area - Scrollable */}
