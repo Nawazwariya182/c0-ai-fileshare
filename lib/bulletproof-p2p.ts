@@ -109,6 +109,7 @@ export class BulletproofP2P {
   private pc: RTCPeerConnection | null = null
   private dataChannel: RTCDataChannel | null = null
   private isInitiator: boolean = false
+  private isDestroyed: boolean = false
   
   // Connection state
   private connectionStatus: ConnectionStatus = "connecting"
@@ -142,6 +143,9 @@ export class BulletproofP2P {
   private reconnectAttempts: number = 0
   private maxReconnectAttempts: number = 5
   private reconnectDelay: number = 1000
+  private signalingReconnectTimeout: NodeJS.Timeout | null = null
+  private peerReconnectTimeout: NodeJS.Timeout | null = null
+  private connectionStabilityTimer: NodeJS.Timeout | null = null
   
   // WebRTC Configuration - Optimized for reliability
   private rtcConfig: RTCConfiguration = {
@@ -376,6 +380,29 @@ export class BulletproofP2P {
     }, delay)
   }
   
+  private startPerformanceMonitoring(): void {
+    // Ping every 30 seconds
+    this.pingInterval = setInterval(() => {
+      if (this.dataChannel && this.dataChannel.readyState === 'open') {
+        this.sendP2PMessage({
+          type: 'ping',
+          data: { timestamp: Date.now() },
+          timestamp: Date.now(),
+          id: this.generateId()
+        })
+      }
+      
+      // Send keep-alive to signaling server
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.sendSignalingMessage({
+          type: 'keep-alive',
+          sessionId: this.sessionId,
+          userId: this.userId
+        })
+      }
+    }, 30000)
+  }
+  
   private async handleSignalingMessage(message: SignalingMessage): Promise<void> {
     console.log(`📨 Signaling message: ${message.type}`)
     
@@ -386,13 +413,13 @@ export class BulletproofP2P {
         
       case 'joined':
         this.isInitiator = message.isInitiator ?? false
-        this.userCount = message.userCount ?? 0
+        this.userCount = message.userCount ?? this.userCount
         this.onUserCountChange?.(this.userCount)
         console.log(`✅ Joined session as ${this.isInitiator ? 'INITIATOR' : 'RECEIVER'}`)
         break
         
       case 'user-joined':
-        this.userCount = message.userCount ?? 0
+        this.userCount = message.userCount ?? this.userCount
         this.onUserCountChange?.(this.userCount)
         if (message.readyForP2P) {
           console.log('🚀 Ready for P2P - initiating connection')
@@ -422,7 +449,7 @@ export class BulletproofP2P {
         break
         
       case 'user-left':
-        this.userCount = message.userCount ?? 0
+        this.userCount = message.userCount ?? this.userCount
         this.onUserCountChange?.(this.userCount)
         if (!message.temporary) {
           this.resetPeerConnection()
@@ -532,6 +559,12 @@ export class BulletproofP2P {
   
   private async handleOffer(message: SignalingMessage): Promise<void> {
     try {
+      if (!message.offer) {
+        console.error('❌ Received offer message without offer data')
+        this.onError?.('Invalid offer received')
+        return
+      }
+
       if (!this.pc) {
         this.pc = new RTCPeerConnection(this.rtcConfig)
         
@@ -562,10 +595,6 @@ export class BulletproofP2P {
         }
       }
       
-      if (!message.offer) {
-        throw new Error('Offer is missing from message')
-      }
-      
       await this.pc.setRemoteDescription(message.offer)
       const answer = await this.pc.createAnswer()
       await this.pc.setLocalDescription(answer)
@@ -585,7 +614,13 @@ export class BulletproofP2P {
   
   private async handleAnswer(message: SignalingMessage): Promise<void> {
     try {
-      if (this.pc && message.answer) {
+      if (!message.answer) {
+        console.error('❌ Received answer message without answer data')
+        this.onError?.('Invalid answer received')
+        return
+      }
+
+      if (this.pc) {
         await this.pc.setRemoteDescription(message.answer)
         console.log('✅ Answer processed')
       }
@@ -944,29 +979,6 @@ export class BulletproofP2P {
     this.onFileTransferUpdate?.(transfers)
   }
   
-  private startPerformanceMonitoring(): void {
-    // Ping every 30 seconds
-    this.pingInterval = setInterval(() => {
-      if (this.dataChannel && this.dataChannel.readyState === 'open') {
-        this.sendP2PMessage({
-          type: 'ping',
-          data: { timestamp: Date.now() },
-          timestamp: Date.now(),
-          id: this.generateId()
-        })
-      }
-      
-      // Send keep-alive to signaling server
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.sendSignalingMessage({
-          type: 'keep-alive',
-          sessionId: this.sessionId,
-          userId: this.userId
-        })
-      }
-    }, 30000)
-  }
-  
   private updateConnectionQuality(): void {
     // Simple quality assessment based on connection state
     if (this.pc && this.dataChannel) {
@@ -981,7 +993,7 @@ export class BulletproofP2P {
     }
   }
   
-  private resetPeerConnection(): void {
+  private resetPeerConnection(setDisconnected?: boolean): void {
     console.log('🔄 Resetting peer connection')
     
     if (this.dataChannel) {
@@ -994,8 +1006,10 @@ export class BulletproofP2P {
       this.pc = null
     }
     
-    this.connectionStatus = "disconnected"
-    this.onConnectionStatusChange?.(this.connectionStatus)
+    if (setDisconnected !== false) {
+      this.connectionStatus = "disconnected"
+      this.onConnectionStatusChange?.(this.connectionStatus)
+    }
   }
   
   private getBrowserInfo(): string {
@@ -1014,12 +1028,30 @@ export class BulletproofP2P {
   destroy(): void {
     console.log('🛑 Destroying BulletproofP2P')
     
+    this.isDestroyed = true
+    
+    // Clear all timers
     if (this.pingInterval) {
       clearInterval(this.pingInterval)
       this.pingInterval = null
     }
     
-    this.resetPeerConnection()
+    if (this.signalingReconnectTimeout) {
+      clearTimeout(this.signalingReconnectTimeout)
+      this.signalingReconnectTimeout = null
+    }
+    
+    if (this.peerReconnectTimeout) {
+      clearTimeout(this.peerReconnectTimeout)
+      this.peerReconnectTimeout = null
+    }
+    
+    if (this.connectionStabilityTimer) {
+      clearInterval(this.connectionStabilityTimer)
+      this.connectionStabilityTimer = null
+    }
+    
+    this.resetPeerConnection(true) // Set to disconnected on destroy
     
     if (this.ws) {
       this.ws.close(1000, 'Client disconnect')
