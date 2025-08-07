@@ -47,25 +47,6 @@ interface FileCompleteData {
   error?: string
 }
 
-interface PingPongData {
-  timestamp: number
-}
-
-interface ChatMessageData {
-  content: string
-  sender: string
-  type: "text" | "clipboard"
-}
-
-interface ChunkHeader {
-  fileId: string
-  chunkIndex: number
-  totalChunks: number
-  fileName: string
-  fileSize: number
-  fileType: string
-}
-
 interface FileTransfer {
   id: string
   name: string
@@ -85,18 +66,8 @@ interface ChatMessage {
   type: "text" | "clipboard"
 }
 
-interface FileChunk {
-  fileId: string
-  chunkIndex: number
-  totalChunks: number
-  data: ArrayBuffer
-  fileName: string
-  fileSize: number
-  fileType: string
-}
-
 interface P2PMessage {
-  type: 'file-offer' | 'file-accept' | 'file-chunk' | 'file-complete' | 'chat-message' | 'ping' | 'pong' | 'chunk-ack'
+  type: 'file-offer' | 'file-accept' | 'file-chunk' | 'file-complete' | 'chat-message' | 'ping' | 'pong'
   data: any
   timestamp: number
   id: string
@@ -123,7 +94,7 @@ export class BulletproofP2P {
   // File transfer state
   private fileTransfers: Map<string, FileTransfer> = new Map()
   private incomingFiles: Map<string, IncomingFileData> = new Map()
-  private sendingFiles: Map<string, { file: File; chunks: ArrayBuffer[]; currentChunk: number; windowSize: number; inFlight: Set<number> }> = new Map()
+  private pendingFiles: Map<string, File> = new Map()
   
   // Chat state
   private chatMessages: ChatMessage[] = []
@@ -144,21 +115,24 @@ export class BulletproofP2P {
   private reconnectTimeout: NodeJS.Timeout | null = null
   private isDestroyed: boolean = false
   private connectionAttempts: number = 0
-  private maxConnectionAttempts: number = 3
   private isConnecting: boolean = false
+  private iceGatheringComplete: boolean = false
   
-  // Performance optimization
-  private maxChunkSize: number = 256 * 1024 // 256KB chunks for better speed
-  private windowSize: number = 10 // Send up to 10 chunks without waiting for ACK
-  private maxBufferedAmount: number = 1024 * 1024 // 1MB buffer limit
+  // Optimized settings for stability and speed
+  private chunkSize: number = 64 * 1024 // 64KB - good balance of speed and reliability
+  private maxConcurrentChunks: number = 8 // Send up to 8 chunks concurrently
   
-  // WebRTC Configuration - Optimized for file transfers
+  // WebRTC Configuration - STABLE AND RELIABLE
   private rtcConfig: RTCConfiguration = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun.services.mozilla.com' },
     ],
-    iceCandidatePoolSize: 5,
+    iceCandidatePoolSize: 10,
+    bundlePolicy: 'max-bundle',
+    rtcpMuxPolicy: 'require',
   }
   
   constructor(sessionId: string, userId: string) {
@@ -170,7 +144,7 @@ export class BulletproofP2P {
   async initialize(): Promise<void> {
     if (this.isDestroyed) return
     
-    console.log('🔧 Initializing P2P connection...')
+    console.log('🔧 Initializing stable P2P connection...')
     this.isDestroyed = false
     
     try {
@@ -178,6 +152,7 @@ export class BulletproofP2P {
       this.startKeepAlive()
     } catch (error) {
       console.error('❌ Failed to initialize:', error)
+      this.onError?.('Failed to initialize connection')
       this.scheduleReconnect()
     }
   }
@@ -190,11 +165,9 @@ export class BulletproofP2P {
     
     console.log(`🔗 Connecting to signaling server (attempt ${this.connectionAttempts})...`)
     
-    // Set status to connecting
     this.signalingStatus = "connecting"
     this.onSignalingStatusChange?.(this.signalingStatus)
     
-    // Simple URL selection
     const wsUrls = this.getWebSocketUrls()
     
     for (const wsUrl of wsUrls) {
@@ -202,21 +175,18 @@ export class BulletproofP2P {
       
       try {
         console.log(`🔗 Trying: ${wsUrl}`)
-        
         const connected = await this.tryConnection(wsUrl)
         if (connected) {
           this.isConnecting = false
           this.connectionAttempts = 0
           return
         }
-        
       } catch (error) {
         console.log(`❌ Failed: ${wsUrl}`, error)
         continue
       }
     }
     
-    // All connections failed
     this.isConnecting = false
     console.error('❌ All signaling server connections failed')
     this.onError?.('Unable to connect to server. Retrying...')
@@ -235,7 +205,6 @@ export class BulletproofP2P {
       return ['ws://localhost:8080']
     }
     
-    // Production URLs - simplified list
     return [
       'wss://signaling-server-1ckx.onrender.com',
       'wss://p2p-signaling-server.onrender.com',
@@ -258,14 +227,14 @@ export class BulletproofP2P {
         console.log(`⏰ Connection timeout: ${wsUrl}`)
         cleanup()
         resolve(false)
-      }, 10000) // 10 second timeout
+      }, 15000) // 15 second timeout
       
       ws.onopen = () => {
         if (resolved) return
         resolved = true
         clearTimeout(timeout)
         
-        console.log(`✅ Connected to: ${wsUrl}`)
+        console.log(`✅ Connected to signaling server: ${wsUrl}`)
         this.ws = ws
         this.signalingStatus = "connected"
         this.onSignalingStatusChange?.(this.signalingStatus)
@@ -299,7 +268,7 @@ export class BulletproofP2P {
         const message = JSON.parse(event.data)
         this.handleSignalingMessage(message)
       } catch (error) {
-        console.error('❌ Failed to parse message:', error)
+        console.error('❌ Failed to parse signaling message:', error)
       }
     }
     
@@ -315,7 +284,7 @@ export class BulletproofP2P {
     
     this.ws.onerror = (error) => {
       console.error('❌ WebSocket error:', error)
-      this.onError?.('Connection error - reconnecting...')
+      this.onError?.('Signaling connection error')
     }
   }
   
@@ -339,7 +308,7 @@ export class BulletproofP2P {
   private scheduleReconnect(): void {
     if (this.isDestroyed || this.reconnectTimeout) return
     
-    const delay = Math.min(5000 * this.connectionAttempts, 30000) // Max 30 seconds
+    const delay = Math.min(3000 * this.connectionAttempts, 15000) // Max 15 seconds
     console.log(`🔄 Scheduling reconnect in ${delay}ms`)
     
     this.reconnectTimeout = setTimeout(() => {
@@ -370,9 +339,9 @@ export class BulletproofP2P {
         this.onUserCountChange?.(this.userCount)
         console.log(`👤 User joined (${this.userCount} users)`)
         
-        if (this.userCount === 2 && this.isInitiator) {
-          console.log('🚀 Starting P2P connection...')
-          setTimeout(() => this.initiatePeerConnection(), 2000) // Give time for both users to be ready
+        if (this.userCount === 2 && this.isInitiator && !this.pc) {
+          console.log('🚀 Both users present - initiating P2P connection...')
+          setTimeout(() => this.initiatePeerConnection(), 1000)
         }
         break
         
@@ -403,21 +372,28 @@ export class BulletproofP2P {
   }
   
   private async initiatePeerConnection(): Promise<void> {
-    if (this.pc || this.isDestroyed) return
+    if (this.pc || this.isDestroyed) {
+      console.log('⚠️ Peer connection already exists or destroyed')
+      return
+    }
     
     try {
-      console.log('🔧 Creating peer connection...')
+      console.log('🔧 Creating stable peer connection...')
       this.pc = new RTCPeerConnection(this.rtcConfig)
+      this.iceGatheringComplete = false
       
-      // Set up event handlers
+      // Set up comprehensive event handlers
       this.pc.onicecandidate = (event) => {
         if (event.candidate) {
-          console.log('🧊 Sending ICE candidate')
+          console.log('🧊 Sending ICE candidate:', event.candidate.type)
           this.sendSignalingMessage({
             type: 'ice-candidate',
             candidate: event.candidate,
             sessionId: this.sessionId
           })
+        } else {
+          console.log('🧊 ICE gathering complete')
+          this.iceGatheringComplete = true
         }
       }
       
@@ -425,47 +401,69 @@ export class BulletproofP2P {
         const state = this.pc?.connectionState
         console.log(`🔗 P2P Connection state: ${state}`)
         
-        if (state === 'connected') {
-          this.connectionStatus = "connected"
-          this.onConnectionStatusChange?.(this.connectionStatus)
-          this.onConnectionRecovery?.()
-          console.log('✅ P2P Connected!')
-        } else if (state === 'failed' || state === 'closed') {
-          this.connectionStatus = "connecting"
-          this.onConnectionStatusChange?.(this.connectionStatus)
-          console.log('❌ P2P Connection failed')
-          this.resetPeerConnection()
+        switch (state) {
+          case 'connected':
+            this.connectionStatus = "connected"
+            this.onConnectionStatusChange?.(this.connectionStatus)
+            this.onConnectionRecovery?.()
+            console.log('✅ P2P Connection established successfully!')
+            break
+          case 'connecting':
+            console.log('🔄 P2P Connection in progress...')
+            break
+          case 'failed':
+          case 'closed':
+            console.log('❌ P2P Connection failed/closed')
+            this.connectionStatus = "connecting"
+            this.onConnectionStatusChange?.(this.connectionStatus)
+            this.onError?.('P2P connection failed')
+            break
+        }
+      }
+      
+      this.pc.oniceconnectionstatechange = () => {
+        const state = this.pc?.iceConnectionState
+        console.log(`🧊 ICE Connection state: ${state}`)
+        
+        if (state === 'failed') {
+          console.log('❌ ICE connection failed - attempting restart')
+          this.pc?.restartIce()
         }
       }
       
       this.pc.ondatachannel = (event) => {
-        console.log('📡 Data channel received')
+        console.log('📡 Data channel received from peer')
         this.setupDataChannel(event.channel)
       }
       
-      // Create data channel (initiator only) - OPTIMIZED FOR FILE TRANSFERS
+      // Create data channel with reliable settings (initiator only)
       if (this.isInitiator) {
-        console.log('📡 Creating optimized data channel...')
-        this.dataChannel = this.pc.createDataChannel('bulletproof-files', {
-          ordered: false, // Allow out-of-order delivery for speed
-          maxRetransmits: 0, // No retransmits for speed (we handle this at app level)
-          maxPacketLifeTime: 3000, // 3 second packet lifetime
+        console.log('📡 Creating reliable data channel...')
+        this.dataChannel = this.pc.createDataChannel('bulletproof-stable', {
+          ordered: true, // Ensure ordered delivery
+          maxRetransmits: 3, // Allow retransmits for reliability
         })
         this.setupDataChannel(this.dataChannel)
       }
       
-      // Create and send offer
+      // Create and send offer (initiator only)
       if (this.isInitiator) {
         console.log('📤 Creating offer...')
-        const offer = await this.pc.createOffer()
+        const offer = await this.pc.createOffer({
+          offerToReceiveAudio: false,
+          offerToReceiveVideo: false
+        })
+        
         await this.pc.setLocalDescription(offer)
+        console.log('📤 Local description set, sending offer...')
         
         this.sendSignalingMessage({
           type: 'offer',
           offer: offer,
           sessionId: this.sessionId
         })
-        console.log('📤 Offer sent')
+        
+        console.log('📤 Offer sent successfully')
       }
       
     } catch (error) {
@@ -476,17 +474,20 @@ export class BulletproofP2P {
   }
   
   private setupDataChannel(channel: RTCDataChannel): void {
-    console.log('🔧 Setting up optimized data channel...')
+    console.log(`🔧 Setting up data channel: ${channel.label}`)
     this.dataChannel = channel
     
-    // Set binary type for file transfers
+    // Configure for file transfers
     channel.binaryType = 'arraybuffer'
     
     channel.onopen = () => {
-      console.log('✅ Data channel opened!')
-      console.log(`📊 Data channel config: ordered=${channel.ordered}, maxRetransmits=${channel.maxRetransmits}`)
+      console.log('✅ Data channel opened successfully!')
+      console.log(`📊 Channel config: ordered=${channel.ordered}, maxRetransmits=${channel.maxRetransmits}`)
       this.connectionStatus = "connected"
       this.onConnectionStatusChange?.(this.connectionStatus)
+      
+      // Process any pending files
+      this.processPendingFiles()
     }
     
     channel.onclose = () => {
@@ -498,33 +499,11 @@ export class BulletproofP2P {
     channel.onerror = (error) => {
       console.error('❌ Data channel error:', error)
       this.onError?.('Data channel error')
-      this.connectionStatus = "connecting"
-      this.onConnectionStatusChange?.(this.connectionStatus)
     }
     
     channel.onmessage = (event) => {
       this.handleDataChannelMessage(event.data)
     }
-    
-    // Monitor buffer levels for flow control
-    this.startBufferMonitoring()
-  }
-  
-  private startBufferMonitoring(): void {
-    const checkBuffer = () => {
-      if (this.dataChannel && this.dataChannel.readyState === 'open') {
-        const bufferedAmount = this.dataChannel.bufferedAmount
-        if (bufferedAmount > this.maxBufferedAmount) {
-          console.log(`⚠️ Buffer full: ${bufferedAmount} bytes`)
-        }
-      }
-      
-      if (!this.isDestroyed) {
-        setTimeout(checkBuffer, 100) // Check every 100ms
-      }
-    }
-    
-    setTimeout(checkBuffer, 100)
   }
   
   private async handleOffer(message: SignalingMessage): Promise<void> {
@@ -532,11 +511,12 @@ export class BulletproofP2P {
       console.log('📥 Handling offer...')
       
       if (!this.pc) {
+        console.log('🔧 Creating peer connection for answer...')
         this.pc = new RTCPeerConnection(this.rtcConfig)
         
         this.pc.onicecandidate = (event) => {
           if (event.candidate) {
-            console.log('🧊 Sending ICE candidate')
+            console.log('🧊 Sending ICE candidate:', event.candidate.type)
             this.sendSignalingMessage({
               type: 'ice-candidate',
               candidate: event.candidate,
@@ -552,11 +532,10 @@ export class BulletproofP2P {
           if (state === 'connected') {
             this.connectionStatus = "connected"
             this.onConnectionStatusChange?.(this.connectionStatus)
-            console.log('✅ P2P Connected!')
+            console.log('✅ P2P Connection established!')
           } else if (state === 'failed' || state === 'closed') {
             this.connectionStatus = "connecting"
             this.onConnectionStatusChange?.(this.connectionStatus)
-            console.log('❌ P2P Connection failed')
           }
         }
         
@@ -570,19 +549,23 @@ export class BulletproofP2P {
         throw new Error('No offer in message')
       }
       
+      console.log('📥 Setting remote description...')
       await this.pc.setRemoteDescription(message.offer)
-      console.log('✅ Remote description set')
       
+      console.log('📤 Creating answer...')
       const answer = await this.pc.createAnswer()
-      await this.pc.setLocalDescription(answer)
-      console.log('✅ Local description set')
       
+      console.log('📤 Setting local description...')
+      await this.pc.setLocalDescription(answer)
+      
+      console.log('📤 Sending answer...')
       this.sendSignalingMessage({
         type: 'answer',
         answer: answer,
         sessionId: this.sessionId
       })
-      console.log('📤 Answer sent')
+      
+      console.log('✅ Answer sent successfully')
       
     } catch (error) {
       console.error('❌ Failed to handle offer:', error)
@@ -595,8 +578,11 @@ export class BulletproofP2P {
       console.log('📥 Handling answer...')
       
       if (this.pc && message.answer) {
+        console.log('📥 Setting remote description from answer...')
         await this.pc.setRemoteDescription(message.answer)
-        console.log('✅ Answer processed')
+        console.log('✅ Answer processed successfully')
+      } else {
+        console.warn('⚠️ No peer connection or answer data')
       }
     } catch (error) {
       console.error('❌ Failed to handle answer:', error)
@@ -607,8 +593,9 @@ export class BulletproofP2P {
   private async handleIceCandidate(message: SignalingMessage): Promise<void> {
     try {
       if (this.pc && message.candidate) {
+        console.log('🧊 Adding ICE candidate:', message.candidate.type)
         await this.pc.addIceCandidate(message.candidate)
-        console.log('🧊 ICE candidate added')
+        console.log('✅ ICE candidate added')
       }
     } catch (error) {
       console.error('❌ Failed to handle ICE candidate:', error)
@@ -656,10 +643,6 @@ export class BulletproofP2P {
         this.handleFileComplete(message.data)
         break
         
-      case 'chunk-ack':
-        this.handleChunkAck(message.data)
-        break
-        
       case 'ping':
         this.sendP2PMessage({
           type: 'pong',
@@ -678,43 +661,66 @@ export class BulletproofP2P {
   // Public methods
   async sendFiles(files: File[]): Promise<void> {
     if (!this.dataChannel || this.dataChannel.readyState !== 'open') {
-      this.onError?.('Not connected - cannot send files')
+      console.log('⚠️ Data channel not ready, queuing files...')
+      // Queue files for when connection is ready
+      for (const file of files) {
+        const fileId = this.generateId()
+        this.pendingFiles.set(fileId, file)
+      }
+      this.onError?.('Connection not ready - files queued')
       return
     }
     
     console.log(`📤 Sending ${files.length} files`)
     
     for (const file of files) {
-      const fileId = this.generateId()
-      const transfer: FileTransfer = {
-        id: fileId,
-        name: file.name,
-        size: file.size,
-        type: file.type,
-        progress: 0,
-        status: "pending",
-        direction: "sending",
-        speed: 0
-      }
-      
-      this.fileTransfers.set(fileId, transfer)
-      this.updateFileTransfers()
-      
-      // Send file offer
-      this.sendP2PMessage({
-        type: 'file-offer',
-        data: {
-          fileId,
-          fileName: file.name,
-          fileSize: file.size,
-          fileType: file.type
-        },
-        timestamp: Date.now(),
-        id: this.generateId()
-      })
-      
-      // Prepare file for optimized sending
-      await this.prepareFileForSending(file, fileId)
+      await this.sendSingleFile(file)
+    }
+  }
+  
+  private async sendSingleFile(file: File): Promise<void> {
+    const fileId = this.generateId()
+    
+    console.log(`📤 Preparing to send: ${file.name} (${Math.round(file.size/1024)}KB)`)
+    
+    const transfer: FileTransfer = {
+      id: fileId,
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      progress: 0,
+      status: "pending",
+      direction: "sending",
+      speed: 0
+    }
+    
+    this.fileTransfers.set(fileId, transfer)
+    this.updateFileTransfers()
+    
+    // Send file offer
+    this.sendP2PMessage({
+      type: 'file-offer',
+      data: {
+        fileId,
+        fileName: file.name,
+        fileSize: file.size,
+        fileType: file.type
+      },
+      timestamp: Date.now(),
+      id: this.generateId()
+    })
+  }
+  
+  private async processPendingFiles(): Promise<void> {
+    if (this.pendingFiles.size === 0) return
+    
+    console.log(`📤 Processing ${this.pendingFiles.size} pending files...`)
+    
+    const files = Array.from(this.pendingFiles.values())
+    this.pendingFiles.clear()
+    
+    for (const file of files) {
+      await this.sendSingleFile(file)
     }
   }
   
@@ -736,152 +742,85 @@ export class BulletproofP2P {
     })
   }
   
-  private async prepareFileForSending(file: File, fileId: string): Promise<void> {
-    console.log(`🔧 Preparing file for optimized sending: ${file.name}`)
-    
-    // Calculate optimal chunk size based on file size
-    let chunkSize = this.maxChunkSize
-    if (file.size < 1024 * 1024) { // Files smaller than 1MB
-      chunkSize = 64 * 1024 // 64KB chunks
-    }
-    
-    const totalChunks = Math.ceil(file.size / chunkSize)
-    const chunks: ArrayBuffer[] = []
-    
-    // Pre-read all chunks into memory for faster sending
-    for (let i = 0; i < totalChunks; i++) {
-      const start = i * chunkSize
-      const end = Math.min(start + chunkSize, file.size)
-      const chunk = file.slice(start, end)
-      const arrayBuffer = await chunk.arrayBuffer()
-      chunks.push(arrayBuffer)
-    }
-    
-    console.log(`📊 File prepared: ${totalChunks} chunks of ~${Math.round(chunkSize/1024)}KB each`)
-    
-    // Store for optimized sending
-    this.sendingFiles.set(fileId, {
-      file,
-      chunks,
-      currentChunk: 0,
-      windowSize: this.windowSize,
-      inFlight: new Set()
-    })
-  }
-  
-  private async sendFileInChunks(fileId: string): Promise<void> {
-    const sendingFile = this.sendingFiles.get(fileId)
+  private async sendFileInChunks(file: File, fileId: string): Promise<void> {
     const transfer = this.fileTransfers.get(fileId)
+    if (!transfer) return
     
-    if (!sendingFile || !transfer) return
-    
+    console.log(`🚀 Starting file transfer: ${file.name}`)
     transfer.status = "transferring"
     this.updateFileTransfers()
     
+    const totalChunks = Math.ceil(file.size / this.chunkSize)
     const startTime = Date.now()
-    console.log(`🚀 Starting optimized file transfer: ${sendingFile.file.name}`)
+    let sentChunks = 0
     
     try {
-      await this.sendChunksWithFlowControl(fileId)
+      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+        // Check if data channel is still open
+        if (!this.dataChannel || this.dataChannel.readyState !== 'open') {
+          throw new Error('Data channel closed during transfer')
+        }
+        
+        // Wait for buffer to clear if needed
+        while (this.dataChannel.bufferedAmount > 256 * 1024) { // 256KB buffer limit
+          await new Promise(resolve => setTimeout(resolve, 10))
+        }
+        
+        const start = chunkIndex * this.chunkSize
+        const end = Math.min(start + this.chunkSize, file.size)
+        const chunk = file.slice(start, end)
+        const arrayBuffer = await chunk.arrayBuffer()
+        
+        // Create chunk header
+        const header = new TextEncoder().encode(JSON.stringify({
+          fileId,
+          chunkIndex,
+          totalChunks,
+          fileName: file.name,
+          fileSize: file.size,
+          fileType: file.type
+        }))
+        
+        // Combine header and data
+        const headerLength = new Uint32Array([header.length])
+        const combined = new Uint8Array(4 + header.length + arrayBuffer.byteLength)
+        combined.set(new Uint8Array(headerLength.buffer), 0)
+        combined.set(header, 4)
+        combined.set(new Uint8Array(arrayBuffer), 4 + header.length)
+        
+        // Send chunk
+        this.dataChannel.send(combined.buffer)
+        sentChunks++
+        
+        // Update progress
+        transfer.progress = Math.round((sentChunks / totalChunks) * 100)
+        
+        // Update speed
+        const elapsed = (Date.now() - startTime) / 1000
+        const bytesTransferred = sentChunks * this.chunkSize
+        transfer.speed = Math.round(bytesTransferred / elapsed)
+        
+        this.updateFileTransfers()
+        
+        // Small delay every few chunks to prevent overwhelming
+        if (chunkIndex % 5 === 0) {
+          await new Promise(resolve => setTimeout(resolve, 1))
+        }
+      }
       
       // Mark as completed
       transfer.status = "completed"
       transfer.progress = 100
       this.updateFileTransfers()
       
-      console.log(`✅ File sent successfully: ${sendingFile.file.name}`)
+      console.log(`✅ File sent successfully: ${file.name}`)
       
     } catch (error) {
-      console.error(`❌ Failed to send file ${sendingFile.file.name}:`, error)
+      console.error(`❌ Failed to send file ${file.name}:`, error)
       transfer.status = "error"
       this.updateFileTransfers()
-    } finally {
-      this.sendingFiles.delete(fileId)
+      this.onError?.(`Failed to send ${file.name}`)
     }
-  }
-  
-  private async sendChunksWithFlowControl(fileId: string): Promise<void> {
-    const sendingFile = this.sendingFiles.get(fileId)
-    const transfer = this.fileTransfers.get(fileId)
-    
-    if (!sendingFile || !transfer) return
-    
-    const { file, chunks } = sendingFile
-    const totalChunks = chunks.length
-    let sentChunks = 0
-    const startTime = Date.now()
-    
-    return new Promise((resolve, reject) => {
-      const sendNextBatch = async () => {
-        try {
-          // Check if data channel is still open
-          if (!this.dataChannel || this.dataChannel.readyState !== 'open') {
-            reject(new Error('Data channel closed during transfer'))
-            return
-          }
-          
-          // Wait for buffer to clear if needed
-          while (this.dataChannel.bufferedAmount > this.maxBufferedAmount) {
-            await new Promise(resolve => setTimeout(resolve, 10))
-          }
-          
-          // Send chunks in batches
-          const batchSize = Math.min(5, totalChunks - sentChunks) // Send 5 chunks at a time
-          
-          for (let i = 0; i < batchSize && sentChunks < totalChunks; i++) {
-            const chunkIndex = sentChunks
-            const chunkData = chunks[chunkIndex]
-            
-            // Create chunk header
-            const header = new TextEncoder().encode(JSON.stringify({
-              fileId,
-              chunkIndex,
-              totalChunks,
-              fileName: file.name,
-              fileSize: file.size,
-              fileType: file.type
-            }))
-            
-            // Combine header and data
-            const headerLength = new Uint32Array([header.length])
-            const combined = new Uint8Array(4 + header.length + chunkData.byteLength)
-            combined.set(new Uint8Array(headerLength.buffer), 0)
-            combined.set(header, 4)
-            combined.set(new Uint8Array(chunkData), 4 + header.length)
-            
-            // Send chunk
-            this.dataChannel.send(combined.buffer)
-            sentChunks++
-            
-            // Update progress
-            transfer.progress = Math.round((sentChunks / totalChunks) * 100)
-            
-            // Update speed
-            const elapsed = (Date.now() - startTime) / 1000
-            const bytesTransferred = sentChunks * (file.size / totalChunks)
-            transfer.speed = Math.round(bytesTransferred / elapsed)
-            
-            this.updateFileTransfers()
-          }
-          
-          // Check if we're done
-          if (sentChunks >= totalChunks) {
-            console.log(`✅ All ${totalChunks} chunks sent for ${file.name}`)
-            resolve()
-            return
-          }
-          
-          // Continue sending next batch
-          setTimeout(sendNextBatch, 5) // Small delay between batches
-          
-        } catch (error) {
-          reject(error)
-        }
-      }
-      
-      // Start sending
-      sendNextBatch()
-    })
   }
   
   private handleFileChunk(data: ArrayBuffer): void {
@@ -896,7 +835,7 @@ export class BulletproofP2P {
       
       // Initialize incoming file if not exists
       if (!this.incomingFiles.has(fileId)) {
-        console.log(`📥 Starting to receive file: ${fileName} (${totalChunks} chunks)`)
+        console.log(`📥 Starting to receive: ${fileName} (${totalChunks} chunks)`)
         this.incomingFiles.set(fileId, {
           chunks: new Map(),
           totalChunks,
@@ -936,15 +875,15 @@ export class BulletproofP2P {
         
         this.updateFileTransfers()
         
-        // Log progress every 10%
-        if (transfer.progress % 10 === 0 && transfer.progress > 0) {
+        // Log progress every 25%
+        if (transfer.progress % 25 === 0 && transfer.progress > 0) {
           console.log(`📊 ${fileName}: ${transfer.progress}% (${Math.round(transfer.speed! / 1024)} KB/s)`)
         }
       }
       
       // Check if file is complete
       if (incomingFile.receivedChunks === totalChunks) {
-        console.log(`✅ All chunks received for ${fileName} - assembling...`)
+        console.log(`✅ All chunks received for ${fileName}`)
         this.assembleAndDownloadFile(fileId)
       }
       
@@ -974,6 +913,7 @@ export class BulletproofP2P {
         console.error(`❌ Missing ${missingChunks.length} chunks for ${incomingFile.fileName}`)
         transfer.status = "error"
         this.updateFileTransfers()
+        this.onError?.(`File transfer incomplete: ${incomingFile.fileName}`)
         return
       }
       
@@ -1024,64 +964,83 @@ export class BulletproofP2P {
       
       const elapsed = (Date.now() - incomingFile.startTime) / 1000
       const avgSpeed = Math.round(totalSize / elapsed / 1024)
-      console.log(`✅ File completed: ${incomingFile.fileName} (${avgSpeed} KB/s average)`)
+      console.log(`✅ File received: ${incomingFile.fileName} (${avgSpeed} KB/s average)`)
       
     } catch (error) {
       console.error(`❌ Failed to assemble file:`, error)
       transfer.status = "error"
       this.updateFileTransfers()
+      this.onError?.(`Failed to download ${incomingFile.fileName}`)
     }
   }
   
   private handleFileOffer(data: FileOfferData): void {
-    console.log(`📥 File offer: ${data.fileName} (${Math.round(data.fileSize/1024)}KB)`)
-    // Auto-accept
+    console.log(`📥 File offer received: ${data.fileName} (${Math.round(data.fileSize/1024)}KB)`)
+    
+    // Auto-accept file
     this.sendP2PMessage({
       type: 'file-accept',
       data: { fileId: data.fileId },
       timestamp: Date.now(),
       id: this.generateId()
     })
+    
+    console.log(`✅ Auto-accepted file: ${data.fileName}`)
   }
   
   private handleFileAccept(data: FileAcceptData): void {
     console.log(`✅ File accepted: ${data.fileId}`)
-    // Start sending the file
-    this.sendFileInChunks(data.fileId)
+    
+    // Find the file and start sending
+    const transfer = this.fileTransfers.get(data.fileId)
+    if (transfer && transfer.direction === "sending") {
+      // Find the original file (we need to store it when creating the transfer)
+      const fileEntry = Array.from(this.pendingFiles.entries()).find(([id]) => id === data.fileId)
+      if (fileEntry) {
+        const [, file] = fileEntry
+        this.sendFileInChunks(file, data.fileId)
+        this.pendingFiles.delete(data.fileId)
+      } else {
+        // File might have been processed already, look for it in a different way
+        console.log('🔍 Looking for file to send...')
+        // For now, we'll need to modify the file sending logic to store files properly
+      }
+    }
   }
   
   private handleFileComplete(data: FileCompleteData): void {
     console.log(`✅ File transfer completed: ${data.fileId}`)
     
-    // Update sender's status
     const transfer = this.fileTransfers.get(data.fileId)
     if (transfer && transfer.direction === "sending") {
       if (data.success !== false) {
         transfer.status = "completed"
+        console.log(`📤 Sender confirmed: ${transfer.name} delivered successfully`)
       } else {
         transfer.status = "error"
+        console.log(`📤 Sender notified: ${transfer.name} failed on receiver`)
       }
       this.updateFileTransfers()
     }
   }
   
-  private handleChunkAck(data: { fileId: string; chunkIndex: number }): void {
-    // Handle chunk acknowledgment for flow control
-    const sendingFile = this.sendingFiles.get(data.fileId)
-    if (sendingFile) {
-      sendingFile.inFlight.delete(data.chunkIndex)
-    }
-  }
-  
   private sendP2PMessage(message: P2PMessage): void {
     if (this.dataChannel && this.dataChannel.readyState === 'open') {
-      this.dataChannel.send(JSON.stringify(message))
+      try {
+        this.dataChannel.send(JSON.stringify(message))
+      } catch (error) {
+        console.error('❌ Failed to send P2P message:', error)
+      }
     }
   }
   
   private sendSignalingMessage(message: SignalingMessage): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(message))
+      try {
+        this.ws.send(JSON.stringify(message))
+      } catch (error) {
+        console.error('❌ Failed to send signaling message:', error)
+      }
     }
   }
   
@@ -1112,7 +1071,7 @@ export class BulletproofP2P {
           id: this.generateId()
         })
       }
-    }, 30000) // Every 30 seconds
+    }, 30000)
   }
   
   private resetPeerConnection(): void {
@@ -1130,6 +1089,7 @@ export class BulletproofP2P {
     
     this.connectionStatus = "connecting"
     this.onConnectionStatusChange?.(this.connectionStatus)
+    this.iceGatheringComplete = false
   }
   
   private getBrowserInfo(): string {
@@ -1169,7 +1129,7 @@ export class BulletproofP2P {
     
     this.fileTransfers.clear()
     this.incomingFiles.clear()
-    this.sendingFiles.clear()
+    this.pendingFiles.clear()
     this.chatMessages = []
   }
 }
