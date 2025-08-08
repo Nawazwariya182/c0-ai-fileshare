@@ -12,12 +12,14 @@ export interface SignalingMessage {
   candidate?: RTCIceCandidateInit
   temporary?: boolean
 }
+
 export interface ClientInfo {
   isMobile: boolean
   browser: string
   timestamp: number
   url: string
 }
+
 export interface IncomingFileData {
   chunks: Map<number, ArrayBuffer>
   totalChunks: number
@@ -29,16 +31,29 @@ export interface IncomingFileData {
   lastChunkTime: number
   bytesReceived: number
 }
+
+type EncryptionAlgo = 'django-fernet' | 'aes-gcm-chunked'
+type EncAesGcmChunked = {
+  algo: 'aes-gcm-chunked'
+  key: string // base64 raw 256-bit key (per file)
+  iv: string // base64 12-byte base IV (per file)
+  originalName: string
+  tagLength?: number // bits, default 128
+  chunkSize?: number // informational
+}
+type EncDjangoFernet = {
+  algo: 'django-fernet'
+  key: string // Django Fernet key
+  originalName: string
+}
+export type EncryptionInfo = EncAesGcmChunked | EncDjangoFernet
+
 export interface FileOfferData {
   fileId: string
   fileName: string
   fileSize: number
   fileType: string
-  encryption?: {
-    algo: 'django-fernet'
-    key: string
-    originalName: string
-  }
+  encryption?: EncryptionInfo
 }
 export interface FileAcceptData {
   fileId: string
@@ -49,6 +64,7 @@ export interface FileCompleteData {
   totalChunks?: number
   fileSize?: number
 }
+
 export interface FileTransfer {
   id: string
   name: string
@@ -63,6 +79,7 @@ export interface FileTransfer {
   endTime?: number
   bytesTransferred?: number
 }
+
 export interface ChatMessage {
   id: string
   content: string
@@ -70,22 +87,29 @@ export interface ChatMessage {
   timestamp: Date
   type: 'text' | 'clipboard'
 }
-export type P2PMessageType = 'file-offer' | 'file-accept' | 'file-complete' | 'file-cancel' | 'chat-message' | 'ping' | 'pong'
+
+export type P2PMessageType =
+  | 'file-offer'
+  | 'file-accept'
+  | 'file-complete'
+  | 'file-cancel'
+  | 'chat-message'
+  | 'ping'
+  | 'pong'
+
 export interface P2PMessage {
   type: P2PMessageType
   data: any
   timestamp: number
   id: string
 }
+
 export type ConnectionStatus = 'waiting' | 'connecting' | 'connected' | 'reconnecting'
 export type ConnectionQuality = 'excellent' | 'good' | 'poor'
 export type Timer = ReturnType<typeof setTimeout>
 export type Interval = ReturnType<typeof setInterval>
-export interface EncryptionInfo {
-  algo: 'django-fernet'
-  key: string
-  originalName: string
-}
+
+type EncryptionMode = 'local' | 'django' | 'none'
 
 export class BulletproofP2P {
   private sessionId: string
@@ -112,9 +136,14 @@ export class BulletproofP2P {
   // File state
   private fileTransfers = new Map<string, FileTransfer>()
   private incomingFiles = new Map<string, IncomingFileData>()
-  private sendingFiles = new Map<string, File>() // fileId -> (possibly encrypted) File
+  private sendingFiles = new Map<string, File>() // for plaintext or pre-encrypted whole-file (django)
   private activeTransfers = new Set<string>()
+
+  // Encryption state
   private incomingEncryption = new Map<string, EncryptionInfo>() // receiver-side encryption info
+  private incomingLocalKeys = new Map<string, CryptoKey>() // fileId -> CryptoKey (for aes-gcm)
+  private outgoingLocalAes = new Map<string, { key: CryptoKey; baseIv: Uint8Array; keyB64: string; ivB64: string }>()
+  private encryptionMode: EncryptionMode = 'local'
 
   // Offer resend tracking
   private offerResendTimers = new Map<string, Timer>()
@@ -139,9 +168,12 @@ export class BulletproofP2P {
   private DESIRED_CHUNK_SIZE = 256 * 1024 // 256KB target
   private MIN_CHUNK_SIZE = 16 * 1024 // 16KB floor
   private chunkSize = 64 * 1024 // set after DC opens
-  private MAX_BUFFERED_AMOUNT = 8 * 1024 * 1024 // 8MB cap
-  private BUFFERED_AMOUNT_LOW_THRESHOLD = 1 * 1024 * 1024 // 1MB low watermark
-  private PROGRESS_UPDATE_INTERVAL = 250
+  private MAX_BUFFERED_AMOUNT = 8 * 1024 * 1024 // cap
+  private BUFFERED_AMOUNT_LOW_THRESHOLD = 1 * 1024 * 1024 // low watermark
+  private PROGRESS_UPDATE_INTERVAL = 150
+
+  // Dynamic tuning
+  private goodStreak = 0
 
   // ICE recovery
   private ICE_RECOVERY_DELAY = 1500
@@ -181,7 +213,8 @@ export class BulletproofP2P {
     this.sessionId = sessionId
     this.userId = userId
     this.initSignalingServers()
-    console.log(`🚀 BulletproofP2P for session ${sessionId} (user ${userId})`)
+    this.encryptionMode = this.detectEncryptionMode()
+    console.log(`🚀 BulletproofP2P for session ${sessionId} (user ${userId}) mode=${this.encryptionMode}`)
   }
 
   // Public
@@ -209,7 +242,6 @@ export class BulletproofP2P {
   // Public: explicit wait until DC is open (with timeout)
   public async ensureReadyForSend(timeoutMs = 8000): Promise<boolean> {
     const start = Date.now()
-    // Try to (re)negotiate if needed
     this.reconnectIfNeeded()
     while (Date.now() - start < timeoutMs) {
       if (this.dc && this.dc.readyState === 'open') return true
@@ -218,7 +250,7 @@ export class BulletproofP2P {
     return false
   }
 
-  // Encryption endpoints (single-file Django)
+  // Encryption endpoints (Django fallback)
   private getDjangoBaseUrl(): string {
     try {
       const sp = new URLSearchParams(window.location.search)
@@ -231,7 +263,6 @@ export class BulletproofP2P {
     } catch {}
     return 'http://localhost:8000'
   }
-
   private isMixedContentBlocked(url: string) {
     try {
       const pageHttps = window.location.protocol === 'https:'
@@ -241,7 +272,6 @@ export class BulletproofP2P {
       return false
     }
   }
-
   private async getDjangoKey(timeoutMs = 6000): Promise<string> {
     const base = this.getDjangoBaseUrl().replace(/\/$/, '')
     if (this.isMixedContentBlocked(base)) throw new Error('Mixed content: Django URL must be https when page is https')
@@ -258,7 +288,6 @@ export class BulletproofP2P {
       clearTimeout(to)
     }
   }
-
   private async encryptViaDjango(file: File): Promise<{ blob: Blob; key: string } | null> {
     try {
       const base = this.getDjangoBaseUrl().replace(/\/$/, '')
@@ -281,11 +310,10 @@ export class BulletproofP2P {
         clearTimeout(to)
       }
     } catch (e) {
-      console.warn('⚠️ Encrypt via Django failed, falling back to plain send', e)
+      console.warn('⚠️ Encrypt via Django failed, falling back to plain or local encryption', e)
       return null
     }
   }
-
   private async decryptViaDjango(blob: Blob, key: string): Promise<Blob | null> {
     try {
       const base = this.getDjangoBaseUrl().replace(/\/$/, '')
@@ -311,8 +339,49 @@ export class BulletproofP2P {
     }
   }
 
+  // Local AES-GCM (fast path)
+  private detectEncryptionMode(): EncryptionMode {
+    try {
+      const p = new URLSearchParams(window.location.search)
+      const enc = (p.get('enc') || '').toLowerCase()
+      const hasSubtle = typeof window !== 'undefined' && !!window.crypto?.subtle
+      if (enc === 'none') return 'none'
+      if (enc === 'django') return 'django'
+      // default: prefer local if available
+      if (hasSubtle) return 'local'
+      return 'django'
+    } catch {
+      return 'local'
+    }
+  }
+  private async generateAesKey(): Promise<{ key: CryptoKey; rawB64: string }> {
+    const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt'])
+    const raw = await crypto.subtle.exportKey('raw', key)
+    return { key, rawB64: this.toBase64(raw) }
+  }
+  private async importAesKey(b64: string): Promise<CryptoKey> {
+    const raw = this.fromBase64(b64)
+    const rawBuf = this.viewToArrayBuffer(raw) // ensure ArrayBuffer for stricter lib types
+    return await crypto.subtle.importKey('raw', rawBuf, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt'])
+  }
+  private makeBaseIv(): Uint8Array {
+    const iv = new Uint8Array(12)
+    crypto.getRandomValues(iv)
+    return iv
+  }
+  private deriveChunkIv(baseIv: Uint8Array, seq: number): Uint8Array {
+    // 12-byte IV: first 8 bytes from base, last 4 bytes = big-endian seq
+    const iv = new Uint8Array(12)
+    iv.set(baseIv.subarray(0, 8), 0)
+    iv[8] = (seq >>> 24) & 0xff
+    iv[9] = (seq >>> 16) & 0xff
+    iv[10] = (seq >>> 8) & 0xff
+    iv[11] = seq & 0xff
+    return iv
+  }
+
+  // Public API
   async sendFiles(files: File[]): Promise<void> {
-    // If DC not yet open, try to wait a bit (defensive)
     const ready = await this.ensureReadyForSend(5000)
     if (!ready) {
       this.onError?.('Not connected - cannot send files')
@@ -323,10 +392,38 @@ export class BulletproofP2P {
       let fileToSend = original
       let encInfo: EncryptionInfo | undefined
 
-      const enc = await this.encryptViaDjango(original)
-      if (enc) {
-        fileToSend = new File([enc.blob], `${original.name}.enc`, { type: 'application/octet-stream' })
-        encInfo = { algo: 'django-fernet', key: enc.key, originalName: original.name }
+      if (this.encryptionMode === 'local' && crypto?.subtle) {
+        // Per-file AES-GCM key and base IV
+        const { key, rawB64 } = await this.generateAesKey()
+        const baseIv = this.makeBaseIv()
+        const ivB64 = this.toBase64(baseIv.buffer as ArrayBuffer) // cast to satisfy ArrayBuffer requirement
+        const fileId = this.id()
+        // Register meta BEFORE sending offer
+        this.outgoingLocalAes.set(fileId, { key, baseIv, keyB64: rawB64, ivB64 })
+        encInfo = {
+          algo: 'aes-gcm-chunked',
+          key: rawB64,
+          iv: ivB64,
+          originalName: original.name,
+          tagLength: 128,
+        }
+        this.registerSenderTransfer(fileId, original, encInfo)
+        this.sendFileOffer(fileId, {
+          fileName: original.name,
+          fileSize: original.size,
+          fileType: original.type,
+          encryption: encInfo,
+        })
+        // continue loop; actual sending kicked off upon accept
+        continue
+      }
+
+      if (this.encryptionMode === 'django') {
+        const enc = await this.encryptViaDjango(original)
+        if (enc) {
+          fileToSend = new File([enc.blob], `${original.name}.enc`, { type: 'application/octet-stream' })
+          encInfo = { algo: 'django-fernet', key: enc.key, originalName: original.name }
+        }
       }
 
       const fileId = this.id()
@@ -346,7 +443,6 @@ export class BulletproofP2P {
       this.fileTransfers.set(fileId, transfer)
       this.updateFileTransfers()
 
-      // Send initial offer and schedule resends until accepted
       this.sendFileOffer(fileId, {
         fileName: fileToSend.name,
         fileSize: fileToSend.size,
@@ -354,44 +450,6 @@ export class BulletproofP2P {
         encryption: encInfo,
       })
     }
-  }
-
-  private sendFileOffer(fileId: string, meta: { fileName: string; fileSize: number; fileType: string; encryption?: EncryptionInfo }) {
-    this.offersWaiting.add(fileId)
-    const send = () => {
-      this.sendP2P({
-        type: 'file-offer',
-        data: { fileId, ...meta } as FileOfferData,
-        timestamp: Date.now(),
-        id: this.id(),
-      })
-    }
-    send()
-
-    // Backoff resend up to 5 times if not accepted
-    const schedule = (attempt: number) => {
-      if (!this.offersWaiting.has(fileId)) return
-      const delay = 900 + attempt * 700 + Math.floor(Math.random() * 300)
-      const t = setTimeout(() => {
-        if (!this.offersWaiting.has(fileId)) return
-        if (attempt >= 5) {
-          this.offersWaiting.delete(fileId)
-          const tr = this.fileTransfers.get(fileId)
-          if (tr) {
-            tr.status = 'error'
-            this.updateFileTransfers()
-          }
-          this.onError?.('Peer did not accept file offer')
-          return
-        }
-        // Try resending offer (and nudge reconnection if needed)
-        this.reconnectIfNeeded()
-        send()
-        schedule(attempt + 1)
-      }, delay)
-      this.offerResendTimers.set(fileId, t)
-    }
-    schedule(1)
   }
 
   sendMessage(message: ChatMessage): void {
@@ -421,7 +479,6 @@ export class BulletproofP2P {
     if (this.pingInterval) clearInterval(this.pingInterval)
     if (this.connectionRetryTimeout) clearTimeout(this.connectionRetryTimeout)
     if (this.signalingRetryTimeout) clearTimeout(this.signalingRetryTimeout)
-    // Clear offer resend timers
     for (const t of this.offerResendTimers.values()) clearTimeout(t)
     this.offerResendTimers.clear()
     this.offersWaiting.clear()
@@ -433,6 +490,8 @@ export class BulletproofP2P {
     this.sendingFiles.clear()
     this.activeTransfers.clear()
     this.incomingEncryption.clear()
+    this.incomingLocalKeys.clear()
+    this.outgoingLocalAes.clear()
   }
 
   // Signaling
@@ -581,6 +640,7 @@ export class BulletproofP2P {
     if (this.pc && (this.pc.connectionState === 'connected' || this.pc.connectionState === 'connecting')) return
     this.createPC()
     if (this.isInitiator) {
+      // Ordered reliable channel for simplicity and compatibility
       this.dc = this.pc!.createDataChannel('bulletproof-reliable', { ordered: true })
       this.setupDC(this.dc)
       this.negotiate()
@@ -590,7 +650,10 @@ export class BulletproofP2P {
   private createPC(): void {
     if (this.pc) { try { this.pc.close() } catch {} }
     this.pc = new RTCPeerConnection(this.rtcConfig)
-    this.pc.onicecandidate = (e) => { if (e.candidate) this.sendWS({ type: 'ice-candidate', candidate: e.candidate.toJSON(), sessionId: this.sessionId }) }
+
+    this.pc.onicecandidate = (e) => {
+      if (e.candidate) this.sendWS({ type: 'ice-candidate', candidate: e.candidate.toJSON(), sessionId: this.sessionId })
+    }
     this.pc.onconnectionstatechange = () => {
       const st = this.pc?.connectionState
       if (st === 'connected') {
@@ -674,12 +737,12 @@ export class BulletproofP2P {
   // DC
   private setupDC(channel: RTCDataChannel): void {
     channel.binaryType = 'arraybuffer'
-    // Mobile-safe flow control
     const isMobile = /Mobile|Android|iPhone|iPad/i.test(navigator.userAgent)
     if (isMobile) {
-      this.DESIRED_CHUNK_SIZE = 96 * 1024
-      this.MAX_BUFFERED_AMOUNT = 2 * 1024 * 1024
-      this.BUFFERED_AMOUNT_LOW_THRESHOLD = 256 * 1024
+      // More conservative for mobile reliability
+      this.DESIRED_CHUNK_SIZE = 64 * 1024
+      this.MAX_BUFFERED_AMOUNT = 1 * 1024 * 1024
+      this.BUFFERED_AMOUNT_LOW_THRESHOLD = 128 * 1024
     }
     channel.bufferedAmountLowThreshold = this.BUFFERED_AMOUNT_LOW_THRESHOLD
     channel.onopen = () => {
@@ -729,22 +792,65 @@ export class BulletproofP2P {
     }
   }
 
-  // File pipeline
-  private handleFileOffer(data: FileOfferData): void {
-    if (data.encryption?.algo === 'django-fernet') {
-      this.incomingEncryption.set(data.fileId, {
-        algo: 'django-fernet',
-        key: data.encryption.key,
-        originalName: data.encryption.originalName,
+  // File offers and accept
+  private sendFileOffer(fileId: string, meta: { fileName: string; fileSize: number; fileType: string; encryption?: EncryptionInfo }) {
+    this.offersWaiting.add(fileId)
+    const send = () => {
+      this.sendP2P({
+        type: 'file-offer',
+        data: { fileId, fileName: meta.fileName, fileSize: meta.fileSize, fileType: meta.fileType, encryption: meta.encryption } as FileOfferData,
+        timestamp: Date.now(),
+        id: this.id(),
       })
     }
+    send()
+    // Retry up to 5 times if no accept
+    const schedule = (attempt: number) => {
+      if (!this.offersWaiting.has(fileId)) return
+      const delay = 900 + attempt * 700 + Math.floor(Math.random() * 300)
+      const t = setTimeout(() => {
+        if (!this.offersWaiting.has(fileId)) return
+        if (attempt >= 5) {
+          this.offersWaiting.delete(fileId)
+          const tr = this.fileTransfers.get(fileId)
+          if (tr) { tr.status = 'error'; this.updateFileTransfers() }
+          this.onError?.('Peer did not accept file offer')
+          return
+        }
+        this.reconnectIfNeeded()
+        send()
+        schedule(attempt + 1)
+      }, delay)
+      this.offerResendTimers.set(fileId, t)
+    }
+    schedule(1)
+  }
+
+  private registerSenderTransfer(fileId: string, file: File, encInfo?: EncryptionInfo) {
+    this.sendingFiles.set(fileId, file)
+    const showName = file.name
+    const transfer: FileTransfer = {
+      id: fileId,
+      name: showName,
+      size: file.size,
+      type: file.type,
+      progress: 0,
+      status: 'pending',
+      direction: 'sending',
+      speed: 0,
+      startTime: Date.now(),
+      bytesTransferred: 0,
+    }
+    this.fileTransfers.set(fileId, transfer)
+    this.updateFileTransfers()
+  }
+
+  private handleFileOffer(data: FileOfferData): void {
+    if (data.encryption?.algo === 'django-fernet' || data.encryption?.algo === 'aes-gcm-chunked') {
+      this.incomingEncryption.set(data.fileId, data.encryption)
+    }
     // Auto-accept
-    this.sendP2P({
-      type: 'file-accept',
-      data: { fileId: data.fileId },
-      timestamp: Date.now(),
-      id: this.id(),
-    })
+    this.sendP2P({ type: 'file-accept', data: { fileId: data.fileId }, timestamp: Date.now(), id: this.id() })
   }
 
   private async handleFileAccept(data: FileAcceptData): Promise<void> {
@@ -755,31 +861,17 @@ export class BulletproofP2P {
     }
     this.offersWaiting.delete(data.fileId)
 
+    // If local AES, the sendingFiles map holds plaintext; encryption happens per-chunk inline
     const file = this.sendingFiles.get(data.fileId)
-    if (!file) {
-      console.warn('⚠️ accepted file not found', data.fileId)
-      return
-    }
+    if (!file) { console.warn('⚠️ accepted file not found', data.fileId); return }
     await this.sendFileAdaptive(file, data.fileId)
   }
 
-  private async waitForChannelOpen(timeoutMs: number): Promise<boolean> {
-    const start = Date.now()
-    while (Date.now() - start < timeoutMs) {
-      if (this.dc && this.dc.readyState === 'open') return true
-      await this.sleep(250)
-    }
-    return false
-  }
-
-  // Adaptive sender with recovery
+  // Sender: adaptive loop with encryption inline (if enabled)
   private async sendFileAdaptive(file: File, fileId: string): Promise<void> {
     if (!this.dc || this.dc.readyState !== 'open') {
       const reopened = await this.waitForChannelOpen(8000)
-      if (!reopened) {
-        this.onError?.(`Connection lost before sending ${file.name}`)
-        return
-      }
+      if (!reopened) { this.onError?.(`Connection lost before sending ${file.name}`); return }
     }
     const transfer = this.fileTransfers.get(fileId)
     if (!transfer) return
@@ -795,6 +887,10 @@ export class BulletproofP2P {
     let lastUI = 0
     const started = Date.now()
 
+    // Pick encryption context for this file if any
+    const localEnc = this.outgoingLocalAes.get(fileId)
+    const useLocalEnc = !!localEnc && this.encryptionMode === 'local' && crypto?.subtle
+
     try {
       while (offset < file.size) {
         if (!this.dc || this.dc.readyState !== 'open') {
@@ -802,7 +898,7 @@ export class BulletproofP2P {
           if (!reopened) throw new Error('Data channel closed')
         }
 
-        // Guard against possible null channel after await
+        // Backpressure
         if (this.dc && this.dc.bufferedAmount > this.MAX_BUFFERED_AMOUNT) {
           await this.waitBufferedLow()
           continue
@@ -810,14 +906,24 @@ export class BulletproofP2P {
 
         const sctpMax = this.getSctpMaxMessageSize()
         const headerProbe = new TextEncoder().encode(JSON.stringify({ fileId, seq, fileName: file.name, fileSize: file.size, fileType: file.type }))
-        const maxForPayload = Math.max(this.MIN_CHUNK_SIZE, Math.min(this.chunkSize, sctpMax - 4 - headerProbe.length - 32))
+        const maxForPayload = Math.max(this.MIN_CHUNK_SIZE, Math.min(this.chunkSize, sctpMax - 4 - headerProbe.length - 64))
         const size = Math.min(maxForPayload, file.size - offset)
-        const ab = await file.slice(offset, offset + size).arrayBuffer()
+        const plainAb = await file.slice(offset, offset + size).arrayBuffer()
 
+        // Optional: encrypt per chunk (AES-GCM)
+        let payload: ArrayBuffer = plainAb
+        if (useLocalEnc) {
+          const iv = this.deriveChunkIv(localEnc.baseIv, seq)
+          const ivBuf = this.viewToArrayBuffer(iv) // ensure ArrayBuffer
+          payload = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: ivBuf }, localEnc.key, plainAb)
+        }
+
+        // Compose frame
         const header = { fileId, seq, fileName: file.name, fileSize: file.size, fileType: file.type }
         const headerBytes = new TextEncoder().encode(JSON.stringify(header))
-        const totalLen = 4 + headerBytes.length + ab.byteLength
+        const totalLen = 4 + headerBytes.length + payload.byteLength
         if (totalLen > sctpMax) {
+          // shrink chunk and retry
           this.chunkSize = Math.max(this.MIN_CHUNK_SIZE, Math.floor(this.chunkSize / 2))
           continue
         }
@@ -825,13 +931,26 @@ export class BulletproofP2P {
         const out = new Uint8Array(totalLen)
         new DataView(out.buffer).setUint32(0, headerBytes.length, true)
         out.set(headerBytes, 4)
-        out.set(new Uint8Array(ab), 4 + headerBytes.length)
+        out.set(new Uint8Array(payload), 4 + headerBytes.length)
         await this.safeSend(out.buffer)
 
-        offset += ab.byteLength
+        offset += plainAb.byteLength // progress by plaintext bytes for accuracy
         seq++
         transfer.bytesTransferred! = offset
 
+        // Dynamic tuning
+        if (this.dc && this.dc.bufferedAmount < this.BUFFERED_AMOUNT_LOW_THRESHOLD / 2) {
+          this.goodStreak++
+          if (this.goodStreak >= 5) {
+            const newSize = Math.min(this.chunkSize * 2, Math.max(this.DESIRED_CHUNK_SIZE, sctpMax - 4096))
+            if (newSize > this.chunkSize) this.chunkSize = newSize
+            this.goodStreak = 0
+          }
+        } else {
+          this.goodStreak = Math.max(0, this.goodStreak - 1)
+        }
+
+        // UI updates
         const now = Date.now()
         if (now - lastUI > this.PROGRESS_UPDATE_INTERVAL) {
           const elapsed = (now - started) / 1000
@@ -846,6 +965,7 @@ export class BulletproofP2P {
         }
       }
 
+      // Notify completion
       this.sendP2P({ type: 'file-complete', data: { fileId, fileName: file.name, fileSize: file.size }, timestamp: Date.now(), id: this.id() })
       transfer.status = 'completed'
       transfer.progress = 100
@@ -860,6 +980,7 @@ export class BulletproofP2P {
     } finally {
       this.activeTransfers.delete(fileId)
       this.sendingFiles.delete(fileId)
+      this.outgoingLocalAes.delete(fileId)
     }
   }
 
@@ -906,22 +1027,50 @@ export class BulletproofP2P {
       const inc = this.incomingFiles.get(fileId)!
       const t = this.fileTransfers.get(fileId)!
       const seq: number = typeof header.seq === 'number' ? header.seq : inc.receivedChunks
+      const enc = this.incomingEncryption.get(fileId)
 
-      if (!inc.chunks.has(seq)) {
-        inc.chunks.set(seq, chunk)
-        inc.receivedChunks++
-        inc.lastChunkTime = Date.now()
-        inc.bytesReceived += (chunk as ArrayBuffer).byteLength
+      // Decrypt on the fly if AES-GCM chunked
+      const handleChunk = async () => {
+        let plain: ArrayBuffer = chunk
+        if (enc?.algo === 'aes-gcm-chunked' && crypto?.subtle) {
+          // Import key once per file
+          let key = this.incomingLocalKeys.get(fileId)
+          if (!key) {
+            key = await this.importAesKey(enc.key)
+            this.incomingLocalKeys.set(fileId, key)
+          }
+          const baseIv = new Uint8Array(this.fromBase64(enc.iv))
+          const iv = this.deriveChunkIv(baseIv, seq)
+          try {
+            const ivBuf = this.viewToArrayBuffer(iv) // ensure ArrayBuffer
+            plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: ivBuf }, key, chunk)
+          } catch (e) {
+            console.error('❌ AES-GCM decrypt failed', e)
+            // keep ciphertext so assemble can still try Django or fail gracefully
+            plain = new ArrayBuffer(0)
+          }
+        }
+        // Store chunk (plaintext for AES-GCM, or raw)
+        if (!inc.chunks.has(seq)) {
+          inc.chunks.set(seq, plain)
+          inc.receivedChunks++
+          inc.lastChunkTime = Date.now()
+          const delta = plain.byteLength
+          inc.bytesReceived += delta
 
-        const now = Date.now()
-        const elapsed = (now - inc.startTime) / 1000
-        const speed = elapsed > 0 ? Math.round(inc.bytesReceived / elapsed) : 0
-        t.bytesTransferred = inc.bytesReceived
-        t.speed = speed
-        t.progress = Math.min(99, Math.floor((inc.bytesReceived / inc.fileSize) * 100))
-        t.eta = speed > 0 ? Math.round((inc.fileSize - inc.bytesReceived) / speed) : 0
-        this.updateFileTransfers()
+          const now = Date.now()
+          const elapsed = (now - inc.startTime) / 1000
+          const speed = elapsed > 0 ? Math.round(inc.bytesReceived / elapsed) : 0
+          t.bytesTransferred = inc.bytesReceived
+          t.speed = speed
+          t.progress = Math.min(99, Math.floor((inc.bytesReceived / inc.fileSize) * 100))
+          t.eta = speed > 0 ? Math.round((inc.fileSize - inc.bytesReceived) / speed) : 0
+          this.updateFileTransfers()
+        }
       }
+
+      // Fire and forget, but errors are logged
+      void handleChunk()
     } catch (e) {
       console.error('❌ onFileChunk', e)
     }
@@ -976,16 +1125,15 @@ export class BulletproofP2P {
       let blob = new Blob(parts, { type: inc.fileType || 'application/octet-stream' })
       let downloadName = inc.fileName
 
-      // Auto-decrypt via Django if needed
+      // Post-decrypt only if we used Django (AES-GCM already produced plaintext parts)
       const enc = this.incomingEncryption.get(fileId)
-      if (enc) {
+      if (enc?.algo === 'django-fernet') {
         const dec = await this.decryptViaDjango(blob, enc.key)
-        if (dec) {
-          blob = dec
-          downloadName = enc.originalName
-        } else {
-          this.onError?.('Decryption failed - providing encrypted file instead')
-        }
+        if (dec) { blob = dec; downloadName = enc.originalName }
+        else { this.onError?.('Decryption failed - providing encrypted file instead') }
+      } else if (enc?.algo === 'aes-gcm-chunked') {
+        // Already decrypted on the fly; just ensure name is original
+        downloadName = enc.originalName || downloadName
       }
 
       const url = URL.createObjectURL(blob)
@@ -1004,8 +1152,9 @@ export class BulletproofP2P {
       this.updateFileTransfers()
 
       this.incomingFiles.delete(fileId)
-      this.activeTransfers.delete(fileId)
       this.incomingEncryption.delete(fileId)
+      this.incomingLocalKeys.delete(fileId)
+      this.activeTransfers.delete(fileId)
 
       // Ack completion
       this.sendP2P({ type: 'file-complete', data: { fileId }, timestamp: Date.now(), id: this.id() })
@@ -1047,26 +1196,32 @@ export class BulletproofP2P {
   private waitBufferedLow(): Promise<void> {
     if (!this.dc) return Promise.resolve()
     return new Promise((resolve) => {
-      const h = () => {
-        this.dc?.removeEventListener('bufferedamountlow', h)
-        resolve()
-      }
+      const h = () => { this.dc?.removeEventListener('bufferedamountlow', h); resolve() }
       this.dc?.addEventListener('bufferedamountlow', h, { once: true } as any)
     })
   }
   private selectChunkSize(): void {
     const max = this.getSctpMaxMessageSize()
-    const safe = Math.max(this.MIN_CHUNK_SIZE, Math.min(this.DESIRED_CHUNK_SIZE, max - 2048))
+    const safe = Math.max(this.MIN_CHUNK_SIZE, Math.min(this.DESIRED_CHUNK_SIZE, max - 4096))
     this.chunkSize = safe
+    // thresholds proportional to chunk
     this.BUFFERED_AMOUNT_LOW_THRESHOLD = Math.min(2 * 1024 * 1024, Math.floor(this.chunkSize * 4))
-    this.MAX_BUFFERED_AMOUNT = Math.max(8 * 1024 * 1024, this.BUFFERED_AMOUNT_LOW_THRESHOLD * 4)
+    this.MAX_BUFFERED_AMOUNT = Math.max(4 * 1024 * 1024, this.BUFFERED_AMOUNT_LOW_THRESHOLD * 4)
     if (this.dc) this.dc.bufferedAmountLowThreshold = this.BUFFERED_AMOUNT_LOW_THRESHOLD
-    console.log(`📏 SCTP max=${max}B, chunk=${this.chunkSize}B, lowThreshold=${this.BUFFERED_AMOUNT_LOW_THRESHOLD}B`)
+    console.log(`📏 SCTP max=${max}B, chunk=${this.chunkSize}B, low=${this.BUFFERED_AMOUNT_LOW_THRESHOLD}B maxBuf=${this.MAX_BUFFERED_AMOUNT}B`)
   }
   private getSctpMaxMessageSize(): number {
     const sctp = (this.pc as any)?.sctp
     const m = typeof sctp?.maxMessageSize === 'number' && isFinite(sctp.maxMessageSize) ? sctp.maxMessageSize : 256 * 1024
     return Math.max(64 * 1024, m)
+  }
+  private async waitForChannelOpen(timeoutMs: number): Promise<boolean> {
+    const start = Date.now()
+    while (Date.now() - start < timeoutMs) {
+      if (this.dc && this.dc.readyState === 'open') return true
+      await this.sleep(250)
+    }
+    return false
   }
 
   // Keep-alives & quality
@@ -1075,12 +1230,7 @@ export class BulletproofP2P {
       if (this.isDestroyed) return
       if (this.dc && this.dc.readyState === 'open') {
         this.lastPingTime = Date.now()
-        this.sendP2P({
-          type: 'ping',
-          data: { timestamp: this.lastPingTime },
-          timestamp: this.lastPingTime,
-          id: this.id(),
-        })
+        this.sendP2P({ type: 'ping', data: { timestamp: this.lastPingTime }, timestamp: this.lastPingTime, id: this.id() })
       }
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
         this.sendWS({ type: 'keep-alive', sessionId: this.sessionId, userId: this.userId })
@@ -1097,19 +1247,11 @@ export class BulletproofP2P {
   // Utils
   private sendP2P(msg: P2PMessage): void {
     if (!this.dc || this.dc.readyState !== 'open') return
-    try {
-      this.dc.send(JSON.stringify(msg))
-    } catch (e) {
-      console.error('❌ DC send', e)
-    }
+    try { this.dc.send(JSON.stringify(msg)) } catch (e) { console.error('❌ DC send', e) }
   }
   private sendWS(msg: SignalingMessage): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return
-    try {
-      this.ws.send(JSON.stringify(msg))
-    } catch (e) {
-      console.error('❌ WS send', e)
-    }
+    try { this.ws.send(JSON.stringify(msg)) } catch (e) { console.error('❌ WS send', e) }
   }
   private setConnecting(): void {
     if (this.connectionStatus !== 'connected') {
@@ -1127,21 +1269,14 @@ export class BulletproofP2P {
     }
   }
   private resetPeer(_reason: string): void {
-    if (this.activeTransfers.size > 0) {
-      try { this.pc?.restartIce() } catch {}
-      return
-    }
+    if (this.activeTransfers.size > 0) { try { this.pc?.restartIce() } catch {}; return }
     try { this.dc?.close() } catch {}
     try { this.pc?.close() } catch {}
     this.dc = null
     this.pc = null
   }
-  private sleep(ms: number) {
-    return new Promise((r) => setTimeout(r, ms))
-  }
-  private id(): string {
-    return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)
-  }
+  private sleep(ms: number) { return new Promise(r => setTimeout(r, ms)) }
+  private id(): string { return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2) }
   private browser(): string {
     const ua = navigator.userAgent
     if (ua.includes('Chrome')) return 'Chrome'
@@ -1158,5 +1293,28 @@ export class BulletproofP2P {
   private updateFileTransfers(): void {
     const transfers = Array.from(this.fileTransfers.values())
     this.onFileTransferUpdate?.(transfers)
+  }
+
+  // Base64 helpers
+  private toBase64(buf: ArrayBuffer): string {
+    let binary = ''
+    const bytes = new Uint8Array(buf)
+    const len = bytes.byteLength
+    for (let i = 0; i < len; i++) binary += String.fromCharCode(bytes[i])
+    return btoa(binary)
+  }
+  private fromBase64(b64: string): Uint8Array {
+    const binary = atob(b64)
+    const len = binary.length
+    const bytes = new Uint8Array(len)
+    for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i)
+    return bytes
+  }
+
+  // TypedArray -> exact ArrayBuffer (fix for DOM lib stricter generics)
+  private viewToArrayBuffer(view: ArrayBufferView): ArrayBuffer {
+    const buf = view.buffer as ArrayBuffer
+    if (view.byteOffset === 0 && view.byteLength === buf.byteLength) return buf
+    return buf.slice(view.byteOffset, view.byteOffset + view.byteLength) as ArrayBuffer
   }
 }
