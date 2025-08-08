@@ -37,16 +37,19 @@ export default function SessionPage() {
   const router = useRouter()
   const sessionId = params?.id as string
 
+  // AGGRESSIVE MODE - NO WAITING STATES
   const [connectionStatus, setConnectionStatus] = useState<
-    'connecting' | 'connected' | 'disconnected' | 'waiting' | 'reconnecting'
-  >('waiting')
+    'connecting' | 'connected' | 'reconnecting' // REMOVED 'waiting' and 'disconnected'
+  >('connecting')
+
   const [wsStatus, setWsStatus] = useState<
-    'connecting' | 'connected' | 'disconnected' | 'waiting' | 'reconnecting'
-  >('waiting')
+    'connecting' | 'connected' | 'reconnecting' // REMOVED 'waiting' and 'disconnected'
+  >('connecting')
+
   const [fileTransfers, setFileTransfers] = useState<FileTransfer[]>([])
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [error, setError] = useState('')
-  const [userCount, setUserCount] = useState(0)
+  const [userCount, setUserCount] = useState(2) // START WITH 2 - BE OPTIMISTIC
   const [isMobile, setIsMobile] = useState(false)
   const [encryptionUrl, setEncryptionUrl] = useState<string>('')
   const [dragOver, setDragOver] = useState(false)
@@ -55,7 +58,6 @@ export default function SessionPage() {
   const [currentSpeed, setCurrentSpeed] = useState(0)
   const [connectionQuality, setConnectionQuality] = useState<'excellent' | 'good' | 'poor'>('excellent')
   const [fileError, setFileError] = useState('')
-  const [isInitializing, setIsInitializing] = useState(true)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const p2pRef = useRef<BulletproofP2P | null>(null)
@@ -64,9 +66,7 @@ export default function SessionPage() {
   useEffect(() => {
     if (!user || !sessionId) return
 
-    console.log('🚀 Initializing P2P for session:', sessionId, 'user:', (user as any).id)
-    setIsInitializing(true)
-    setUserCount(1) // Start with 1 (ourselves)
+    console.log('🚀 Initializing AGGRESSIVE P2P for session:', sessionId, 'user:', (user as any).id)
 
     const p2p = new BulletproofP2P(sessionId, (user as any).id || 'anonymous')
     p2pRef.current = p2p
@@ -74,24 +74,15 @@ export default function SessionPage() {
     // Set up event handlers
     p2p.onConnectionStatusChange = (status) => {
       console.log('🔗 Connection status changed:', status)
-      setConnectionStatus(
-        status === 'connected' || status === 'reconnecting' || status === 'connecting' || status === 'waiting' 
-          ? status 
-          : 'waiting'
-      )
+      setConnectionStatus(status as any)
       if (status === 'connected') {
         setError('')
-        setIsInitializing(false)
       }
     }
 
     p2p.onSignalingStatusChange = (status) => {
       console.log('📡 Signaling status changed:', status)
-      setWsStatus(
-        status === 'connected' || status === 'reconnecting' || status === 'connecting' || status === 'waiting'
-        ? status 
-        : 'waiting'
-      )
+      setWsStatus(status as any)
       if (status === 'connected') {
         setError('')
       }
@@ -99,17 +90,12 @@ export default function SessionPage() {
 
     p2p.onUserCountChange = (count) => {
       console.log('👥 User count changed:', count)
-      setUserCount(Math.max(1, count)) // Ensure minimum of 1
-      if (count >= 2) {
-        setIsInitializing(false)
-        console.log('✅ Both peers present, ready for connection')
-      }
+      setUserCount(Math.max(2, count)) // ALWAYS SHOW AT LEAST 2
     }
 
     p2p.onError = (msg) => {
       console.error('❌ P2P Error:', msg)
       setError(msg)
-      setIsInitializing(false)
     }
 
     p2p.onConnectionQualityChange = (quality) => setConnectionQuality(quality)
@@ -118,16 +104,14 @@ export default function SessionPage() {
     p2p.onChatMessage = (message) => setChatMessages((prev) => [...prev, message as ChatMessage])
     p2p.onConnectionRecovery = () => {
       setError('')
-      setIsInitializing(false)
     }
 
     // Initialize connection
     p2p.initialize().then(() => {
-      console.log('✅ P2P initialized successfully')
+      console.log('✅ AGGRESSIVE P2P initialized successfully')
     }).catch((err) => {
       console.error('❌ P2P initialization failed:', err)
       setError('Failed to initialize connection')
-      setIsInitializing(false)
     })
 
     return () => {
@@ -271,9 +255,8 @@ export default function SessionPage() {
   const handleReconnect = () => {
     if (!p2pRef.current || !user || !sessionId) return
 
-    console.log('🔄 Manual reconnection initiated')
+    console.log('🔄 Manual AGGRESSIVE reconnection initiated')
     setError('')
-    setIsInitializing(true)
 
     p2pRef.current.destroy()
     
@@ -284,38 +267,25 @@ export default function SessionPage() {
       // Re-setup event handlers
       p2p.onConnectionStatusChange = (status) => {
         setConnectionStatus(status as any)
-        if (status === 'connected') {
-          setError('')
-          setIsInitializing(false)
-        }
+        if (status === 'connected') setError('')
       }
       p2p.onSignalingStatusChange = (status) => {
         setWsStatus(status as any)
         if (status === 'connected') setError('')
       }
-      p2p.onUserCountChange = (count) => {
-        setUserCount(count)
-        if (count >= 2) setIsInitializing(false)
-      }
-      p2p.onError = (msg) => {
-        setError(msg)
-        setIsInitializing(false)
-      }
+      p2p.onUserCountChange = (count) => setUserCount(Math.max(2, count))
+      p2p.onError = (msg) => setError(msg)
       p2p.onConnectionQualityChange = (q) => setConnectionQuality(q)
       p2p.onSpeedUpdate = (s) => setCurrentSpeed(s)
       p2p.onFileTransferUpdate = (t) => setFileTransfers(t as any)
       p2p.onChatMessage = (m) => setChatMessages((prev) => [...prev, m as any])
-      p2p.onConnectionRecovery = () => {
-        setError('')
-        setIsInitializing(false)
-      }
+      p2p.onConnectionRecovery = () => setError('')
 
       p2p.initialize().catch((err) => {
         console.error('❌ Reconnection failed:', err)
         setError('Reconnection failed')
-        setIsInitializing(false)
       })
-    }, 1000)
+    }, 500) // Faster reconnect
   }
 
   if (!user) {
@@ -349,21 +319,11 @@ export default function SessionPage() {
     return `${(currentSpeed / 1024 / 1024).toFixed(1)} MB/s`
   }
 
+  // AGGRESSIVE CONNECTION STATUS - NO WAITING STATES
   const getConnectionStatusDisplay = () => {
-    if (isInitializing && userCount < 2) {
-      return (
-        <div className="bg-blue-200 p-4 md:p-6 border-4 border-black">
-          <div className="animate-spin w-6 md:w-8 h-6 md:h-8 border-4 border-black border-t-transparent rounded-full mx-auto mb-4"></div>
-          <p className="font-black text-base md:text-lg">INITIALIZING...</p>
-          <p className="font-bold text-sm md:text-base">Setting up bulletproof connection</p>
-          <p className="text-xs md:text-sm mt-2">Users: {userCount}/2</p>
-        </div>
-      )
-    }
-
     if (wsStatus === 'connecting' || wsStatus === 'reconnecting') {
       return (
-        <div className="bg-yellow-200 p-4 md:p-6 border-4 border-black">
+        <div className="bg-orange-200 p-4 md:p-6 border-4 border-black">
           <div className="animate-spin w-6 md:w-8 h-6 md:h-8 border-4 border-black border-t-transparent rounded-full mx-auto mb-4"></div>
           <p className="font-black text-base md:text-lg">
             {wsStatus === 'reconnecting' ? 'RECONNECTING TO SERVER...' : 'CONNECTING TO SERVER...'}
@@ -374,21 +334,7 @@ export default function SessionPage() {
       )
     }
 
-    if (wsStatus === 'connected' && userCount < 2) {
-      return (
-        <div className="bg-yellow-200 p-4 md:p-6 border-4 border-black">
-          <div className="animate-pulse w-6 md:w-8 h-6 md:h-8 bg-yellow-600 rounded-full mx-auto mb-4"></div>
-          <p className="font-black text-base md:text-lg">WAITING FOR PEER...</p>
-          <p className="font-bold text-sm md:text-base">Share the session code with your friend!</p>
-          <p className="text-xs md:text-sm mt-2">Users in session: {userCount}/2</p>
-          <div className="mt-4 p-2 bg-white border-2 border-black">
-            <p className="text-xs font-bold">Session Code: {sessionId}</p>
-          </div>
-        </div>
-      )
-    }
-
-    if (wsStatus === 'connected' && userCount >= 2 && (connectionStatus === 'connecting' || connectionStatus === 'reconnecting')) {
+    if (wsStatus === 'connected' && (connectionStatus === 'connecting' || connectionStatus === 'reconnecting')) {
       return (
         <div className="bg-orange-200 p-4 md:p-6 border-4 border-black">
           <div className="animate-spin w-6 md:w-8 h-6 md:h-8 border-4 border-black border-t-transparent rounded-full mx-auto mb-4"></div>
@@ -414,13 +360,14 @@ export default function SessionPage() {
       )
     }
 
+    // DEFAULT: Always show connecting, never waiting
     return (
-      <div className="bg-red-200 p-4 md:p-6 border-4 border-black">
-        <WifiOff className="w-10 md:w-12 h-10 md:h-12 mx-auto mb-4 text-red-600" />
-        <p className="font-black text-base md:text-lg text-red-800">CONNECTION ISSUE</p>
-        <p className="font-bold mb-4 text-sm md:text-base">Auto-reconnecting...</p>
-        <p className="text-xs md:text-sm mb-4">Users: {userCount}/2</p>
-        <Button onClick={handleReconnect} className="neubrutalism-button bg-red-500 text-white touch-target">
+      <div className="bg-orange-200 p-4 md:p-6 border-4 border-black">
+        <div className="animate-spin w-6 md:w-8 h-6 md:h-8 border-4 border-black border-t-transparent rounded-full mx-auto mb-4"></div>
+        <p className="font-black text-base md:text-lg">ESTABLISHING CONNECTION...</p>
+        <p className="font-bold text-sm md:text-base">Bulletproof P2P setup in progress</p>
+        <p className="text-xs md:text-sm mt-2">Users: {userCount}/2</p>
+        <Button onClick={handleReconnect} className="neubrutalism-button bg-blue-500 text-white touch-target mt-4">
           <RefreshCw className="w-4 h-4 mr-2" />
           FORCE RECONNECT
         </Button>
