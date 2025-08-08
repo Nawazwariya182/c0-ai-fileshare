@@ -123,8 +123,6 @@ export class BulletproofP2P {
   private isDestroyed = false
   private isConnected = false
   private connectionEstablished = false
-
-  // Connection state tracking
   private hasLocalDescription = false
   private hasRemoteDescription = false
   private pendingIceCandidates: RTCIceCandidateInit[] = []
@@ -242,7 +240,7 @@ export class BulletproofP2P {
     this.onUserCountChange?.(this.userCount)
     
     // Start all connection processes IMMEDIATELY
-    await this.connectToSignaling()
+    await this.connectToSignalingServer()
     this.startConnectionForcing()
     this.startKeepAlive()
     this.startHealthCheck()
@@ -364,7 +362,6 @@ export class BulletproofP2P {
     this.incomingEncryption.clear()
   }
 
-  // BULLETPROOF CONNECTION FORCING SYSTEM
   private startConnectionForcing(): void {
     console.log('⚡ Starting BULLETPROOF connection forcing...')
     
@@ -402,7 +399,7 @@ export class BulletproofP2P {
     
     if (!wsReady) {
       console.log('⚡ WebSocket not ready - forcing signaling connection')
-      this.connectToSignaling()
+      this.connectToSignalingServer()
       return
     }
     
@@ -531,7 +528,7 @@ export class BulletproofP2P {
       
       this.dc = this.pc.createDataChannel('bulletproof-data', {
         ordered: true,
-        maxRetransmits: 3
+        maxRetransmits: 5
       })
       
       this.setupBulletproofDataChannel(this.dc)
@@ -579,6 +576,7 @@ export class BulletproofP2P {
 
   private setupBulletproofDataChannel(channel: RTCDataChannel): void {
     console.log('⚡ Setting up BULLETPROOF data channel')
+    this.dc = channel // Ensure this.dc is set
     channel.binaryType = 'arraybuffer'
     channel.bufferedAmountLowThreshold = this.BUFFERED_AMOUNT_LOW_THRESHOLD
     
@@ -628,7 +626,7 @@ export class BulletproofP2P {
       
       if (!wsHealthy) {
         console.log('⚡ WebSocket unhealthy - forcing reconnection')
-        this.connectToSignaling()
+        this.connectToSignalingServer()
       }
       
       if (!pcHealthy || !dcHealthy) {
@@ -678,15 +676,15 @@ export class BulletproofP2P {
     console.log('🌐 Signaling servers:', this.signalingServers)
   }
 
-  private async connectToSignaling(): Promise<void> {
+  private async connectToSignalingServer(): Promise<void> {
     if (this.isDestroyed) return
-    
+  
     console.log('⚡ Connecting to signaling server BULLETPROOF...')
     this.updateSignalingStatus("connecting")
-    
+  
     // Try to connect immediately
     const connected = await this.tryBulletproofSignalingConnection()
-    
+  
     if (!connected) {
       // Start retry interval if not connected
       if (!this.signalingRetryInterval) {
@@ -698,7 +696,7 @@ export class BulletproofP2P {
             }
             return
           }
-          
+  
           await this.tryBulletproofSignalingConnection()
         }, this.SIGNALING_RETRY_INTERVAL)
       }
@@ -707,15 +705,15 @@ export class BulletproofP2P {
 
   private async tryBulletproofSignalingConnection(): Promise<boolean> {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) return true
-    
+  
     const url = this.signalingServers[this.currentServerIndex]
     console.log(`⚡ Trying BULLETPROOF signaling: ${url}`)
-    
+  
     return new Promise((resolve) => {
       try {
         const ws = new WebSocket(url)
         let settled = false
-        
+  
         const timeout = setTimeout(() => {
           if (!settled) {
             settled = true
@@ -725,23 +723,23 @@ export class BulletproofP2P {
             resolve(false)
           }
         }, 5000)
-        
+  
         ws.onopen = () => {
           if (settled) return
           settled = true
           clearTimeout(timeout)
-          
+  
           console.log(`⚡ BULLETPROOF WebSocket connected: ${url}`)
           this.ws = ws
           this.setupBulletproofWebSocket()
           this.updateSignalingStatus("connected")
-          
+  
           // Stop retry attempts
           if (this.signalingRetryInterval) {
             clearInterval(this.signalingRetryInterval)
             this.signalingRetryInterval = null
           }
-          
+  
           // Send join message IMMEDIATELY
           this.sendSignalingMessage({
             type: 'join',
@@ -754,10 +752,10 @@ export class BulletproofP2P {
               url: window.location.href
             }
           })
-          
+  
           resolve(true)
         }
-        
+  
         ws.onerror = () => {
           if (!settled) {
             settled = true
@@ -767,7 +765,7 @@ export class BulletproofP2P {
             resolve(false)
           }
         }
-        
+  
         ws.onclose = () => {
           if (!settled) {
             settled = true
@@ -776,7 +774,7 @@ export class BulletproofP2P {
             resolve(false)
           }
         }
-        
+  
       } catch (error) {
         console.log(`💥 WebSocket creation failed: ${url}`, error)
         this.currentServerIndex = (this.currentServerIndex + 1) % this.signalingServers.length
@@ -803,7 +801,7 @@ export class BulletproofP2P {
       this.updateSignalingStatus("connecting")
       if (!this.isDestroyed) {
         // Immediately restart signaling connection
-        setTimeout(() => this.connectToSignaling(), 100)
+        setTimeout(() => this.connectToSignalingServer(), 100)
       }
     }
     
@@ -843,8 +841,7 @@ export class BulletproofP2P {
         
       case 'user-left':
         console.log('👋 User left:', message)
-        // Keep trying to connect - stay optimistic
-        this.userCount = 2
+        this.userCount = 2 // Always show 2
         this.onUserCountChange?.(this.userCount)
         break
         
@@ -870,15 +867,12 @@ export class BulletproofP2P {
   }
 
   private async handleBulletproofOffer(message: SignalingMessage): Promise<void> {
-    if (!message.offer) return
-    
-    try {
       // Ensure we have a peer connection
       if (!this.pc || this.pc.connectionState === 'closed' || this.pc.connectionState === 'failed') {
         await this.createBulletproofPeerConnection()
       }
       
-      if (!this.pc) return
+      if (!this.pc || !message.offer) return
       
       console.log('📞 Setting remote description BULLETPROOF (offer)')
       await this.pc.setRemoteDescription(new RTCSessionDescription(message.offer))
@@ -911,20 +905,11 @@ export class BulletproofP2P {
       })
       
       console.log('📞 BULLETPROOF answer sent')
-      
-    } catch (error) {
-      console.error('❌ Failed to handle bulletproof offer:', error)
-      // Reset and retry
-      this.hasRemoteDescription = false
-      this.hasLocalDescription = false
-      setTimeout(() => this.handleBulletproofOffer(message), 100)
-    }
   }
 
   private async handleBulletproofAnswer(message: SignalingMessage): Promise<void> {
-    if (!this.pc || !message.answer) return
-    
-    try {
+      if (!this.pc || !message.answer) return
+      
       console.log('📞 Setting remote description BULLETPROOF (answer)')
       await this.pc.setRemoteDescription(new RTCSessionDescription(message.answer))
       this.hasRemoteDescription = true
@@ -941,35 +926,21 @@ export class BulletproofP2P {
       this.pendingIceCandidates = []
       
       console.log('✅ BULLETPROOF answer processed')
-      
-    } catch (error) {
-      console.error('❌ Failed to handle bulletproof answer:', error)
-      this.hasRemoteDescription = false
-    }
   }
 
   private async handleBulletproofIceCandidate(message: SignalingMessage): Promise<void> {
-    if (!message.candidate) return
-    
-    try {
-      if (!this.pc || !this.hasRemoteDescription) {
+      if (!this.pc || !this.hasRemoteDescription || !message.candidate) {
         // Buffer the candidate
         console.log('🧊 Buffering ICE candidate for later')
-        this.pendingIceCandidates.push(message.candidate)
+        if (message.candidate) {
+          this.pendingIceCandidates.push(message.candidate)
+        }
         return
       }
       
       const candidate = new RTCIceCandidate(message.candidate)
       await this.pc.addIceCandidate(candidate)
       console.log('🧊 ICE candidate added BULLETPROOF')
-      
-    } catch (error) {
-      console.error('❌ Failed to add ICE candidate:', error)
-      // Buffer it for later
-      if (this.pendingIceCandidates.length < 20) {
-        this.pendingIceCandidates.push(message.candidate)
-      }
-    }
   }
 
   private handleDataChannelMessage(data: any): void {
@@ -1343,7 +1314,7 @@ export class BulletproofP2P {
       // Send acknowledgment
       this.sendP2P({
         type: 'file-complete',
-        data: { fileId },
+        data: { fileId: fileId },
         timestamp: Date.now(),
         id: this.generateId()
       })
@@ -1554,7 +1525,7 @@ export class BulletproofP2P {
     // Online/offline detection
     window.addEventListener('online', () => {
       console.log('🌐 Network online - BULLETPROOF RECONNECT')
-      this.connectToSignaling()
+      this.connectToSignalingServer()
       this.forceConnection()
     })
     
@@ -1568,7 +1539,7 @@ export class BulletproofP2P {
       if (document.visibilityState === 'visible') {
         console.log('👁️ Page visible - BULLETPROOF RECONNECT')
         if (!this.connectionEstablished) {
-          this.connectToSignaling()
+          this.connectToSignalingServer()
           this.forceConnection()
         }
       }
@@ -1587,10 +1558,14 @@ export class BulletproofP2P {
   }
 
   private sendSignalingMessage(message: SignalingMessage): void {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      console.warn('⚠️ Cannot send signaling message - WebSocket not ready')
+      return
+    }
     
     try {
       this.ws.send(JSON.stringify(message))
+      console.log('📤 Sent signaling message:', message.type)
     } catch (error) {
       console.error('❌ Failed to send signaling message:', error)
     }
