@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # Single-file Django encryption server with CORS:
 #   GET  /api/key       -> {"key": "<base64_fernet_key>"}
+#   GET  /api/status    -> {"status": "ok"}
 #   POST /api/encrypt   -> multipart: file, key  => encrypted bytes
 #   POST /api/decrypt   -> multipart: file, key  => decrypted bytes
 #
@@ -34,8 +35,8 @@ if not settings.configured:
     DEFAULT_CHARSET="utf-8",
     STATIC_URL="/static/",
     USE_TZ=True,
-    FILE_UPLOAD_MAX_MEMORY_SIZE=100 * 1024 * 1024,  # 100MB
-    DATA_UPLOAD_MAX_MEMORY_SIZE=100 * 1024 * 1024,  # 100MB
+    FILE_UPLOAD_MAX_MEMORY_SIZE=100 * 1024 * 1024,
+    DATA_UPLOAD_MAX_MEMORY_SIZE=100 * 1024 * 1024,
   )
 
 from django.core.management import execute_from_command_line
@@ -76,11 +77,7 @@ def api_status(request: HttpRequest) -> HttpResponse:
     f = Fernet(tk)
     sample = b"ok"
     ok = f.decrypt(f.encrypt(sample)) == sample
-    return add_cors_headers(
-      JsonResponse(
-        {"status": "ok" if ok else "error", "service": "bulletproof-p2p-encryption-server", "timestamp": int(time.time())}
-      )
-    )
+    return add_cors_headers(JsonResponse({"status": "ok" if ok else "error", "service": "bulletproof-p2p-encryption-server", "timestamp": int(time.time())}))
   except Exception as e:
     logger.error(f"Status failed: {e}")
     return add_cors_headers(JsonResponse({"status": "error", "error": str(e)}, status=500))
@@ -93,15 +90,7 @@ def health_check(request: HttpRequest) -> HttpResponse:
     f = Fernet(tk)
     data = b"health"
     ok = f.decrypt(f.encrypt(data)) == data
-    return add_cors_headers(
-      JsonResponse(
-        {
-          "status": "healthy" if ok else "unhealthy",
-          "service": "bulletproof-p2p-encryption-server",
-          "timestamp": int(time.time()),
-        }
-      )
-    )
+    return add_cors_headers(JsonResponse({"status": "healthy" if ok else "unhealthy", "service": "bulletproof-p2p-encryption-server", "timestamp": int(time.time())}))
   except Exception as e:
     logger.error(f"Health check failed: {e}")
     return add_cors_headers(JsonResponse({"status": "unhealthy", "error": str(e)}, status=500))
@@ -194,7 +183,7 @@ urlpatterns = [
   path("api/encrypt/", api_encrypt, name="api_encrypt_alt"),
   path("api/decrypt", api_decrypt, name="api_decrypt"),
   path("api/decrypt/", api_decrypt, name="api_decrypt_alt"),
-  # OPTIONS preflight
+  # OPTIONS preflight (duplicates are OK here; Django matches first)
   path("api/key", handle_preflight),
   path("api/encrypt", handle_preflight),
   path("api/decrypt", handle_preflight),
