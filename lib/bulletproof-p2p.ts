@@ -97,7 +97,7 @@ interface P2PMessage {
   id: string
 }
 
-type ConnectionStatus = "connecting" | "connected" | "reconnecting"
+type ConnectionStatus = "connecting" | "connected" // REMOVED "reconnecting" - NEVER DISCONNECT
 type ConnectionQuality = "excellent" | "good" | "poor"
 
 interface EncryptionInfo {
@@ -114,22 +114,20 @@ export class BulletproofP2P {
   private dc: RTCDataChannel | null = null
   private isInitiator = false
 
-  // State - BULLETPROOF CONNECTION
+  // State - INSTANT CONNECTION, NEVER DISCONNECT
   private connectionStatus: ConnectionStatus = "connecting"
   private signalingStatus: ConnectionStatus = "connecting"
   private connectionQuality: ConnectionQuality = "excellent"
   private currentSpeed = 0
   private userCount = 2 // Always optimistic
   private isDestroyed = false
-  private connectionAttempts = 0
-  private maxConnectionAttempts = 50 // Keep trying
+  private isConnected = false
 
-  // Timers
-  private connectionRetryTimeout: ReturnType<typeof setTimeout> | null = null
-  private signalingRetryTimeout: ReturnType<typeof setTimeout> | null = null
+  // INSTANT CONNECTION - NO DELAYS
+  private connectionAttemptInterval: ReturnType<typeof setInterval> | null = null
+  private signalingRetryInterval: ReturnType<typeof setInterval> | null = null
   private pingInterval: ReturnType<typeof setInterval> | null = null
-  private connectionCheckInterval: ReturnType<typeof setInterval> | null = null
-  private iceGatheringTimeout: ReturnType<typeof setTimeout> | null = null
+  private keepAliveInterval: ReturnType<typeof setInterval> | null = null
 
   // File state
   private fileTransfers = new Map<string, FileTransfer>()
@@ -161,34 +159,33 @@ export class BulletproofP2P {
   private BUFFERED_AMOUNT_LOW_THRESHOLD = 1 * 1024 * 1024
   private PROGRESS_UPDATE_INTERVAL = 250
 
-  // Connection settings - BULLETPROOF
-  private CONNECTION_RETRY_DELAY = 1000
-  private CONNECTION_CHECK_INTERVAL = 2000
-  private ICE_GATHERING_TIMEOUT = 10000
-  private SIGNALING_RETRY_BASE = 1000
-  private SIGNALING_RETRY_MAX = 5000
+  // INSTANT CONNECTION SETTINGS - NO DELAYS
+  private CONNECTION_ATTEMPT_INTERVAL = 100 // Try every 100ms
+  private SIGNALING_RETRY_INTERVAL = 500 // Retry every 500ms
+  private KEEP_ALIVE_INTERVAL = 1000 // Keep alive every 1s
 
   // Signaling servers
   private signalingServers: string[] = []
   private currentServerIndex = 0
-  private backoffAttempts = 0
 
-  // Enhanced STUN/TURN configuration - MORE SERVERS
+  // BULLETPROOF WEBRTC CONFIG - MAXIMUM RELIABILITY
   private rtcConfig: RTCConfiguration = {
     iceServers: [
-      // Google STUN servers
+      // Multiple Google STUN servers for instant connection
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
       { urls: 'stun:stun2.l.google.com:19302' },
       { urls: 'stun:stun3.l.google.com:19302' },
       { urls: 'stun:stun4.l.google.com:19302' },
       
-      // Additional STUN servers
+      // Additional reliable STUN servers
       { urls: 'stun:stun.stunprotocol.org:3478' },
       { urls: 'stun:stun.voiparound.com' },
       { urls: 'stun:stun.voipbuster.com' },
+      { urls: 'stun:stun.voipstunt.com' },
+      { urls: 'stun:stun.counterpath.com' },
       
-      // TURN servers
+      // Multiple TURN servers for NAT traversal
       {
         urls: [
           'turn:openrelay.metered.ca:80?transport=udp',
@@ -208,7 +205,7 @@ export class BulletproofP2P {
         credential: 'webrtc'
       }
     ],
-    iceCandidatePoolSize: 10,
+    iceCandidatePoolSize: 10, // Pre-gather ICE candidates
     bundlePolicy: 'max-bundle',
     rtcpMuxPolicy: 'require',
     iceTransportPolicy: 'all'
@@ -219,14 +216,13 @@ export class BulletproofP2P {
     this.userId = userId
     this.initSignalingServers()
     this.bindLifecycleHandlers()
-    console.log(`🚀 BulletproofP2P initialized - BULLETPROOF MODE for session ${sessionId}`)
+    console.log(`🚀 BulletproofP2P initialized - INSTANT CONNECTION MODE for session ${sessionId}`)
   }
 
   // Public API
   async initialize(): Promise<void> {
-    console.log('🔄 Initializing BULLETPROOF P2P connection...')
+    console.log('⚡ Initializing INSTANT P2P connection...')
     this.isDestroyed = false
-    this.connectionAttempts = 0
     this.userCount = 2 // Always optimistic
     this.updateConnectionStatus("connecting")
     this.updateSignalingStatus("connecting")
@@ -234,9 +230,9 @@ export class BulletproofP2P {
     // Immediately notify UI of 2 users
     this.onUserCountChange?.(this.userCount)
     
-    // Start all connection processes
-    await this.connectToSignaling()
-    this.startConnectionMonitoring()
+    // Start all connection processes IMMEDIATELY
+    this.connectToSignaling()
+    this.startInstantConnectionAttempts()
     this.startKeepAlive()
   }
 
@@ -336,12 +332,11 @@ export class BulletproofP2P {
     console.log('🛑 Destroying P2P connection...')
     this.isDestroyed = true
     
-    // Clear all timers
+    // Clear all intervals
+    if (this.connectionAttemptInterval) clearInterval(this.connectionAttemptInterval)
+    if (this.signalingRetryInterval) clearInterval(this.signalingRetryInterval)
     if (this.pingInterval) clearInterval(this.pingInterval)
-    if (this.connectionCheckInterval) clearInterval(this.connectionCheckInterval)
-    if (this.connectionRetryTimeout) clearTimeout(this.connectionRetryTimeout)
-    if (this.signalingRetryTimeout) clearTimeout(this.signalingRetryTimeout)
-    if (this.iceGatheringTimeout) clearTimeout(this.iceGatheringTimeout)
+    if (this.keepAliveInterval) clearInterval(this.keepAliveInterval)
     
     // Close connections
     try { this.dc?.close() } catch {}
@@ -356,73 +351,179 @@ export class BulletproofP2P {
     this.incomingEncryption.clear()
   }
 
-  // BULLETPROOF CONNECTION MONITORING
-  private startConnectionMonitoring(): void {
-    console.log('🔍 Starting connection monitoring...')
+  // INSTANT CONNECTION SYSTEM - NO DELAYS
+  private startInstantConnectionAttempts(): void {
+    console.log('⚡ Starting INSTANT connection attempts...')
     
-    this.connectionCheckInterval = setInterval(() => {
-      if (this.isDestroyed) return
-      
-      const wsConnected = this.ws && this.ws.readyState === WebSocket.OPEN
-      const pcConnected = this.pc && this.pc.connectionState === 'connected'
-      const dcConnected = this.dc && this.dc.readyState === 'open'
-      
-      console.log(`🔍 Connection check - WS: ${wsConnected}, PC: ${pcConnected}, DC: ${dcConnected}`)
-      
-      if (wsConnected && !pcConnected && this.connectionAttempts < this.maxConnectionAttempts) {
-        console.log('🔄 WebSocket connected but P2P not - attempting connection...')
-        this.attemptPeerConnection()
-      }
-      
-      if (pcConnected && !dcConnected) {
-        console.log('🔄 Peer connected but data channel not - recreating...')
-        this.createDataChannel()
-      }
-      
-    }, this.CONNECTION_CHECK_INTERVAL)
+    // Try to connect immediately
+    this.attemptInstantConnection()
+    
+    // Keep trying every 100ms until connected
+    this.connectionAttemptInterval = setInterval(() => {
+      if (this.isDestroyed || this.isConnected) return
+      this.attemptInstantConnection()
+    }, this.CONNECTION_ATTEMPT_INTERVAL)
   }
 
-  private async attemptPeerConnection(): Promise<void> {
-    if (this.isDestroyed || this.connectionAttempts >= this.maxConnectionAttempts) return
+  private attemptInstantConnection(): void {
+    if (this.isDestroyed || this.isConnected) return
     
-    this.connectionAttempts++
-    console.log(`🔗 Attempting peer connection (attempt ${this.connectionAttempts}/${this.maxConnectionAttempts})`)
+    const wsReady = this.ws && this.ws.readyState === WebSocket.OPEN
+    const pcReady = this.pc && (this.pc.connectionState === 'connected' || this.pc.connectionState === 'connecting')
+    const dcReady = this.dc && this.dc.readyState === 'open'
     
-    try {
-      // Always create fresh peer connection
-      await this.createPeerConnection()
-      
-      // Determine who should initiate
-      const shouldInitiate = this.isInitiator || this.connectionAttempts % 2 === 1
-      
-      if (shouldInitiate) {
-        console.log('🎯 Initiating connection as leader')
-        this.createDataChannel()
-        await this.createAndSendOffer()
-      } else {
-        console.log('🎯 Waiting for offer as follower')
-      }
-      
-    } catch (error) {
-      console.error('❌ Peer connection attempt failed:', error)
-      this.scheduleConnectionRetry()
+    console.log(`⚡ Connection check - WS: ${wsReady}, PC: ${pcReady}, DC: ${dcReady}`)
+    
+    if (wsReady && !dcReady) {
+      console.log('⚡ WebSocket ready - creating peer connection INSTANTLY')
+      this.createInstantPeerConnection()
     }
   }
 
-  private scheduleConnectionRetry(): void {
-    if (this.isDestroyed || this.connectionAttempts >= this.maxConnectionAttempts) return
+  private async createInstantPeerConnection(): Promise<void> {
+    if (this.isDestroyed || this.isConnected) return
     
-    const delay = Math.min(this.CONNECTION_RETRY_DELAY * Math.pow(1.2, this.connectionAttempts), 10000)
-    console.log(`🔄 Scheduling connection retry in ${delay}ms`)
-    
-    this.connectionRetryTimeout = setTimeout(() => {
-      if (!this.isDestroyed) {
-        this.attemptPeerConnection()
+    try {
+      console.log('⚡ Creating INSTANT peer connection...')
+      
+      // Create peer connection immediately
+      this.pc = new RTCPeerConnection(this.rtcConfig)
+      
+      // Set up event handlers for INSTANT connection
+      this.pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          console.log('🧊 Sending ICE candidate INSTANTLY')
+          this.sendSignalingMessage({
+            type: 'ice-candidate',
+            candidate: event.candidate.toJSON(),
+            sessionId: this.sessionId
+          })
+        }
       }
-    }, delay)
+      
+      this.pc.onconnectionstatechange = () => {
+        const state = this.pc?.connectionState
+        console.log('🔗 Peer connection state:', state)
+        
+        if (state === 'connected') {
+          console.log('🎉 INSTANT CONNECTION ESTABLISHED!')
+          this.isConnected = true
+          this.updateConnectionStatus("connected")
+          this.onConnectionRecovery?.()
+          
+          // Stop connection attempts
+          if (this.connectionAttemptInterval) {
+            clearInterval(this.connectionAttemptInterval)
+            this.connectionAttemptInterval = null
+          }
+        }
+      }
+      
+      this.pc.oniceconnectionstatechange = () => {
+        const state = this.pc?.iceConnectionState
+        console.log('🧊 ICE connection state:', state)
+        
+        if (state === 'connected' || state === 'completed') {
+          console.log('🧊 ICE connection successful!')
+          this.isConnected = true
+          this.updateConnectionStatus("connected")
+        }
+      }
+      
+      this.pc.ondatachannel = (event) => {
+        console.log('📡 Received data channel INSTANTLY')
+        this.dc = event.channel
+        this.setupInstantDataChannel(this.dc)
+      }
+      
+      // Create data channel immediately if initiator
+      if (this.isInitiator) {
+        console.log('🎯 Creating data channel as initiator INSTANTLY')
+        this.dc = this.pc.createDataChannel('bulletproof-instant', {
+          ordered: true,
+          maxRetransmits: 0 // No retransmits for speed
+        })
+        this.setupInstantDataChannel(this.dc)
+        
+        // Create and send offer IMMEDIATELY
+        this.createInstantOffer()
+      }
+      
+    } catch (error) {
+      console.error('❌ Instant peer connection failed:', error)
+      // Try again immediately
+      setTimeout(() => this.createInstantPeerConnection(), 50)
+    }
   }
 
-  // Signaling implementation
+  private async createInstantOffer(): Promise<void> {
+    if (!this.pc || this.isDestroyed) return
+    
+    try {
+      console.log('📞 Creating INSTANT offer')
+      
+      const offer = await this.pc.createOffer({
+        offerToReceiveAudio: false,
+        offerToReceiveVideo: false
+      })
+      
+      await this.pc.setLocalDescription(offer)
+      
+      // Send offer IMMEDIATELY - no waiting
+      this.sendSignalingMessage({
+        type: 'offer',
+        offer: offer,
+        sessionId: this.sessionId
+      })
+      
+      console.log('📞 INSTANT offer sent')
+      
+    } catch (error) {
+      console.error('❌ Failed to create instant offer:', error)
+      // Try again immediately
+      setTimeout(() => this.createInstantOffer(), 50)
+    }
+  }
+
+  private setupInstantDataChannel(channel: RTCDataChannel): void {
+    console.log('📡 Setting up INSTANT data channel')
+    channel.binaryType = 'arraybuffer'
+    channel.bufferedAmountLowThreshold = this.BUFFERED_AMOUNT_LOW_THRESHOLD
+    
+    channel.onopen = () => {
+      console.log('🎉 INSTANT DATA CHANNEL OPENED!')
+      this.isConnected = true
+      this.selectOptimalChunkSize()
+      this.updateConnectionStatus("connected")
+      this.startPingPong()
+      
+      // Stop connection attempts
+      if (this.connectionAttemptInterval) {
+        clearInterval(this.connectionAttemptInterval)
+        this.connectionAttemptInterval = null
+      }
+    }
+    
+    channel.onclose = () => {
+      console.log('📡 Data channel closed - INSTANT RECOVERY')
+      this.isConnected = false
+      // Immediately restart connection attempts
+      this.startInstantConnectionAttempts()
+    }
+    
+    channel.onerror = (error) => {
+      console.error('❌ Data channel error - INSTANT RECOVERY:', error)
+      this.isConnected = false
+      // Immediately restart connection attempts
+      this.startInstantConnectionAttempts()
+    }
+    
+    channel.onmessage = (event) => {
+      this.handleDataChannelMessage(event.data)
+    }
+  }
+
+  // Signaling implementation - INSTANT
   private initSignalingServers(): void {
     const host = window.location.hostname
     const isLocal = host === 'localhost' || host === '127.0.0.1'
@@ -459,116 +560,94 @@ export class BulletproofP2P {
     console.log('🌐 Signaling servers:', this.signalingServers)
   }
 
-  private async connectToSignaling(): Promise<void> {
+  private connectToSignaling(): void {
     if (this.isDestroyed) return
     
-    console.log('🔌 Connecting to signaling server...')
+    console.log('⚡ Connecting to signaling server INSTANTLY...')
     this.updateSignalingStatus("connecting")
     
-    // Try each server
-    for (let attempt = 0; attempt < this.signalingServers.length && !this.isDestroyed; attempt++) {
-      const url = this.signalingServers[this.currentServerIndex]
-      console.log(`🔗 Trying signaling server: ${url}`)
-      
-      const connected = await this.trySignalingConnection(url)
-      if (connected) {
-        console.log(`✅ Connected to signaling server: ${url}`)
-        this.backoffAttempts = 0
-        this.updateSignalingStatus("connected")
-        return
-      }
-      
-      this.currentServerIndex = (this.currentServerIndex + 1) % this.signalingServers.length
-      await this.sleep(500)
-    }
+    // Try to connect to first available server
+    this.tryInstantSignalingConnection()
     
-    // All servers failed, schedule retry
-    this.scheduleSignalingRetry()
+    // Keep trying every 500ms until connected
+    this.signalingRetryInterval = setInterval(() => {
+      if (this.isDestroyed || (this.ws && this.ws.readyState === WebSocket.OPEN)) return
+      this.tryInstantSignalingConnection()
+    }, this.SIGNALING_RETRY_INTERVAL)
   }
 
-  private trySignalingConnection(url: string): Promise<boolean> {
-    return new Promise((resolve) => {
-      try {
-        const ws = new WebSocket(url)
-        let settled = false
+  private tryInstantSignalingConnection(): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) return
+    
+    const url = this.signalingServers[this.currentServerIndex]
+    console.log(`⚡ Trying signaling server INSTANTLY: ${url}`)
+    
+    try {
+      const ws = new WebSocket(url)
+      
+      ws.onopen = () => {
+        console.log(`⚡ WebSocket connected INSTANTLY: ${url}`)
+        this.ws = ws
+        this.setupInstantWebSocket()
+        this.updateSignalingStatus("connected")
         
-        const timeout = setTimeout(() => {
-          if (!settled) {
-            settled = true
-            console.log(`⏰ Signaling connection timeout: ${url}`)
-            try { ws.close() } catch {}
-            resolve(false)
-          }
-        }, 10000)
-        
-        ws.onopen = () => {
-          if (settled) return
-          settled = true
-          clearTimeout(timeout)
-          
-          console.log(`🎯 WebSocket opened: ${url}`)
-          this.ws = ws
-          this.setupWebSocket()
-          
-          // Send join message immediately
-          this.sendSignalingMessage({
-            type: 'join',
-            sessionId: this.sessionId,
-            userId: this.userId,
-            clientInfo: {
-              isMobile: /Mobile|Android|iPhone|iPad/i.test(navigator.userAgent),
-              browser: this.getBrowser(),
-              timestamp: Date.now(),
-              url: window.location.href
-            }
-          })
-          
-          resolve(true)
+        // Stop retry attempts
+        if (this.signalingRetryInterval) {
+          clearInterval(this.signalingRetryInterval)
+          this.signalingRetryInterval = null
         }
         
-        ws.onerror = (error) => {
-          if (!settled) {
-            settled = true
-            clearTimeout(timeout)
-            console.log(`❌ WebSocket error: ${url}`, error)
-            resolve(false)
+        // Send join message IMMEDIATELY
+        this.sendSignalingMessage({
+          type: 'join',
+          sessionId: this.sessionId,
+          userId: this.userId,
+          clientInfo: {
+            isMobile: /Mobile|Android|iPhone|iPad/i.test(navigator.userAgent),
+            browser: this.getBrowser(),
+            timestamp: Date.now(),
+            url: window.location.href
           }
-        }
-        
-        ws.onclose = (event) => {
-          if (!settled) {
-            settled = true
-            clearTimeout(timeout)
-            console.log(`🔌 WebSocket closed: ${url}`, event.code, event.reason)
-            resolve(false)
-          }
-        }
-        
-      } catch (error) {
-        console.log(`💥 WebSocket creation failed: ${url}`, error)
-        resolve(false)
+        })
       }
-    })
+      
+      ws.onerror = () => {
+        console.log(`❌ WebSocket error: ${url}`)
+        this.currentServerIndex = (this.currentServerIndex + 1) % this.signalingServers.length
+      }
+      
+      ws.onclose = () => {
+        console.log(`🔌 WebSocket closed: ${url}`)
+        if (!this.isDestroyed) {
+          // Immediately restart signaling connection
+          this.connectToSignaling()
+        }
+      }
+      
+    } catch (error) {
+      console.log(`💥 WebSocket creation failed: ${url}`, error)
+      this.currentServerIndex = (this.currentServerIndex + 1) % this.signalingServers.length
+    }
   }
 
-  private setupWebSocket(): void {
+  private setupInstantWebSocket(): void {
     if (!this.ws) return
     
     this.ws.onmessage = (event) => {
       try {
         const message: SignalingMessage = JSON.parse(event.data)
         console.log('📨 Signaling message:', message.type, message)
-        this.handleSignalingMessage(message)
+        this.handleInstantSignalingMessage(message)
       } catch (error) {
         console.error('❌ Failed to parse signaling message:', error)
       }
     }
     
-    this.ws.onclose = (event) => {
-      console.log('🔌 WebSocket closed:', event.code, event.reason)
+    this.ws.onclose = () => {
+      console.log('🔌 WebSocket closed - INSTANT RECONNECT')
       if (!this.isDestroyed) {
-        this.updateSignalingStatus("reconnecting")
-        setTimeout(() => this.connectToSignaling(), 1000)
+        // Immediately restart signaling connection
+        setTimeout(() => this.connectToSignaling(), 100)
       }
     }
     
@@ -577,55 +656,55 @@ export class BulletproofP2P {
     }
   }
 
-  private async handleSignalingMessage(message: SignalingMessage): Promise<void> {
+  private async handleInstantSignalingMessage(message: SignalingMessage): Promise<void> {
     switch (message.type) {
       case 'connected':
-        console.log('✅ Signaling server connected')
+        console.log('✅ Signaling server connected INSTANTLY')
         break
         
       case 'joined':
-        console.log('🚪 Joined session:', message)
+        console.log('🚪 Joined session INSTANTLY:', message)
         this.isInitiator = message.isInitiator ?? false
         this.userCount = 2 // Always show 2
         this.onUserCountChange?.(this.userCount)
         
         console.log(`👥 User count: ${this.userCount}, Initiator: ${this.isInitiator}`)
         
-        // Start connection attempt immediately
-        setTimeout(() => this.attemptPeerConnection(), 500)
+        // Start connection IMMEDIATELY - no delays
+        this.attemptInstantConnection()
         break
         
       case 'user-joined':
-        console.log('👋 User joined:', message)
+        console.log('👋 User joined INSTANTLY:', message)
         this.userCount = 2 // Always show 2
         this.onUserCountChange?.(this.userCount)
         
         console.log(`👥 User count after join: ${this.userCount}`)
         
-        // Start connection attempt immediately
-        setTimeout(() => this.attemptPeerConnection(), 500)
+        // Start connection IMMEDIATELY - no delays
+        this.attemptInstantConnection()
         break
         
       case 'user-left':
         console.log('👋 User left:', message)
-        // Keep trying to connect
-        this.userCount = 2 // Stay optimistic
+        // Keep trying to connect - stay optimistic
+        this.userCount = 2
         this.onUserCountChange?.(this.userCount)
         break
         
       case 'offer':
-        console.log('📞 Received offer')
-        await this.handleOffer(message)
+        console.log('📞 Received offer INSTANTLY')
+        await this.handleInstantOffer(message)
         break
         
       case 'answer':
-        console.log('📞 Received answer')
-        await this.handleAnswer(message)
+        console.log('📞 Received answer INSTANTLY')
+        await this.handleInstantAnswer(message)
         break
         
       case 'ice-candidate':
-        console.log('🧊 Received ICE candidate')
-        await this.handleIceCandidate(message)
+        console.log('🧊 Received ICE candidate INSTANTLY')
+        await this.handleInstantIceCandidate(message)
         break
         
       case 'error':
@@ -634,242 +713,60 @@ export class BulletproofP2P {
     }
   }
 
-  private scheduleSignalingRetry(): void {
-    const delay = Math.min(
-      this.SIGNALING_RETRY_BASE * Math.pow(1.5, this.backoffAttempts),
-      this.SIGNALING_RETRY_MAX
-    ) + Math.random() * 1000
-    
-    console.log(`🔄 Scheduling signaling retry in ${Math.round(delay)}ms`)
-    this.backoffAttempts++
-    this.updateSignalingStatus("reconnecting")
-    
-    this.signalingRetryTimeout = setTimeout(() => {
-      if (!this.isDestroyed) {
-        this.connectToSignaling()
-      }
-    }, delay)
-  }
-
-  // WebRTC Peer Connection - BULLETPROOF
-  private async createPeerConnection(): Promise<void> {
-    if (this.pc) {
-      console.log('🔄 Closing existing peer connection')
-      try { 
-        this.pc.close() 
-      } catch {}
-    }
-    
-    console.log('🏗️ Creating new peer connection')
-    this.pc = new RTCPeerConnection(this.rtcConfig)
-    
-    // Set up event handlers
-    this.pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        console.log('🧊 Sending ICE candidate:', event.candidate.candidate)
-        this.sendSignalingMessage({
-          type: 'ice-candidate',
-          candidate: event.candidate.toJSON(),
-          sessionId: this.sessionId
-        })
-      } else {
-        console.log('🧊 ICE gathering complete')
-      }
-    }
-    
-    this.pc.onconnectionstatechange = () => {
-      const state = this.pc?.connectionState
-      console.log('🔗 Peer connection state:', state)
-      
-      switch (state) {
-        case 'connected':
-          console.log('🎉 PEER CONNECTION ESTABLISHED!')
-          this.updateConnectionStatus("connected")
-          this.connectionAttempts = 0 // Reset attempts
-          this.onConnectionRecovery?.()
-          break
-        case 'disconnected':
-        case 'failed':
-          console.log('💔 Peer connection failed/disconnected')
-          this.updateConnectionStatus("reconnecting")
-          if (this.activeTransfers.size === 0) {
-            setTimeout(() => this.attemptPeerConnection(), 2000)
-          }
-          break
-        case 'connecting':
-        case 'new':
-          this.updateConnectionStatus("connecting")
-          break
-      }
-    }
-    
-    this.pc.oniceconnectionstatechange = () => {
-      const state = this.pc?.iceConnectionState
-      console.log('🧊 ICE connection state:', state)
-      
-      if (state === 'connected' || state === 'completed') {
-        console.log('🧊 ICE connection successful!')
-      } else if (state === 'failed' || state === 'disconnected') {
-        console.log('🔄 ICE connection failed - attempting restart')
-        try { 
-          this.pc?.restartIce() 
-        } catch {}
-      }
-    }
-    
-    this.pc.onicegatheringstatechange = () => {
-      const state = this.pc?.iceGatheringState
-      console.log('🧊 ICE gathering state:', state)
-      
-      if (state === 'complete') {
-        console.log('🧊 ICE gathering completed')
-      }
-    }
-    
-    this.pc.ondatachannel = (event) => {
-      console.log('📡 Received data channel:', event.channel.label)
-      this.dc = event.channel
-      this.setupDataChannel(this.dc)
-    }
-    
-    // Start ICE gathering timeout
-    this.iceGatheringTimeout = setTimeout(() => {
-      if (this.pc && this.pc.iceGatheringState !== 'complete') {
-        console.log('⏰ ICE gathering timeout - proceeding anyway')
-      }
-    }, this.ICE_GATHERING_TIMEOUT)
-  }
-
-  private createDataChannel(): void {
-    if (!this.pc) return
-    
-    console.log('📡 Creating data channel')
-    this.dc = this.pc.createDataChannel('bulletproof-data', {
-      ordered: true,
-      maxRetransmits: 3
-    })
-    
-    this.setupDataChannel(this.dc)
-  }
-
-  private async createAndSendOffer(): Promise<void> {
-    if (!this.pc) return
-    
-    try {
-      console.log('📞 Creating offer')
-      
-      // Create offer with specific constraints
-      const offer = await this.pc.createOffer({
-        offerToReceiveAudio: false,
-        offerToReceiveVideo: false,
-        iceRestart: false
-      })
-      
-      console.log('📞 Setting local description')
-      await this.pc.setLocalDescription(offer)
-      
-      // Wait a bit for ICE gathering to start
-      await this.sleep(1000)
-      
-      console.log('📞 Sending offer')
-      this.sendSignalingMessage({
-        type: 'offer',
-        offer: offer,
-        sessionId: this.sessionId
-      })
-      
-    } catch (error) {
-      console.error('❌ Failed to create offer:', error)
-      this.scheduleConnectionRetry()
-    }
-  }
-
-  private async handleOffer(message: SignalingMessage): Promise<void> {
+  private async handleInstantOffer(message: SignalingMessage): Promise<void> {
     if (!message.offer) return
     
     try {
       if (!this.pc) {
-        await this.createPeerConnection()
+        await this.createInstantPeerConnection()
       }
       
-      console.log('📞 Setting remote description (offer)')
+      console.log('📞 Setting remote description INSTANTLY (offer)')
       await this.pc!.setRemoteDescription(message.offer)
       
-      console.log('📞 Creating answer')
+      console.log('📞 Creating answer INSTANTLY')
       const answer = await this.pc!.createAnswer()
       
-      console.log('📞 Setting local description (answer)')
+      console.log('📞 Setting local description INSTANTLY (answer)')
       await this.pc!.setLocalDescription(answer)
       
-      // Wait a bit for ICE gathering
-      await this.sleep(1000)
-      
-      console.log('📞 Sending answer')
+      // Send answer IMMEDIATELY - no waiting
       this.sendSignalingMessage({
         type: 'answer',
         answer: answer,
         sessionId: this.sessionId
       })
       
+      console.log('📞 INSTANT answer sent')
+      
     } catch (error) {
-      console.error('❌ Failed to handle offer:', error)
-      this.scheduleConnectionRetry()
+      console.error('❌ Failed to handle instant offer:', error)
+      // Try again immediately
+      setTimeout(() => this.handleInstantOffer(message), 50)
     }
   }
 
-  private async handleAnswer(message: SignalingMessage): Promise<void> {
+  private async handleInstantAnswer(message: SignalingMessage): Promise<void> {
     if (!this.pc || !message.answer) return
     
     try {
-      console.log('📞 Setting remote description (answer)')
+      console.log('📞 Setting remote description INSTANTLY (answer)')
       await this.pc.setRemoteDescription(message.answer)
-      console.log('✅ Answer processed successfully')
+      console.log('✅ INSTANT answer processed')
     } catch (error) {
-      console.error('❌ Failed to handle answer:', error)
-      this.scheduleConnectionRetry()
+      console.error('❌ Failed to handle instant answer:', error)
     }
   }
 
-  private async handleIceCandidate(message: SignalingMessage): Promise<void> {
+  private async handleInstantIceCandidate(message: SignalingMessage): Promise<void> {
     if (!this.pc || !message.candidate) return
     
     try {
       const candidate = new RTCIceCandidate(message.candidate)
       await this.pc.addIceCandidate(candidate)
-      console.log('🧊 ICE candidate added successfully')
+      console.log('🧊 ICE candidate added INSTANTLY')
     } catch (error) {
       console.error('❌ Failed to add ICE candidate:', error)
-    }
-  }
-
-  // Data Channel - BULLETPROOF
-  private setupDataChannel(channel: RTCDataChannel): void {
-    console.log('📡 Setting up data channel:', channel.label)
-    channel.binaryType = 'arraybuffer'
-    channel.bufferedAmountLowThreshold = this.BUFFERED_AMOUNT_LOW_THRESHOLD
-    
-    channel.onopen = () => {
-      console.log('🎉 DATA CHANNEL OPENED - BULLETPROOF CONNECTION READY!')
-      this.selectOptimalChunkSize()
-      this.updateConnectionStatus("connected")
-      this.connectionAttempts = 0 // Reset attempts
-      this.startPingPong()
-    }
-    
-    channel.onclose = () => {
-      console.log('📡 Data channel closed')
-      this.updateConnectionStatus("reconnecting")
-      setTimeout(() => this.attemptPeerConnection(), 1000)
-    }
-    
-    channel.onerror = (error) => {
-      console.error('❌ Data channel error:', error)
-      this.updateConnectionStatus("reconnecting")
-      setTimeout(() => this.attemptPeerConnection(), 1000)
-    }
-    
-    channel.onmessage = (event) => {
-      this.handleDataChannelMessage(event.data)
     }
   }
 
@@ -1177,7 +1074,7 @@ export class BulletproofP2P {
             this.updateFileTransfers()
           }
         }
-      }, 2000)
+      }, 1000)
     }
   }
 
@@ -1348,30 +1245,19 @@ export class BulletproofP2P {
       throw new Error('Data channel not ready')
     }
     
-    let attempts = 0
-    const maxAttempts = 3
-    
-    while (attempts < maxAttempts) {
-      try {
-        this.dc.send(data)
-        return
-      } catch (error: any) {
-        attempts++
-        const errorMessage = String(error?.message || error)
-        
-        if (/message too large/i.test(errorMessage)) {
-          // Reduce chunk size and retry
-          this.chunkSize = Math.max(this.MIN_CHUNK_SIZE, Math.floor(this.chunkSize / 2))
-          console.log(`📏 Reduced chunk size to ${this.chunkSize} bytes`)
-          throw error // Let caller handle this
-        }
-        
-        if (attempts < maxAttempts) {
-          await this.waitForBufferClear()
-        } else {
-          throw error
-        }
+    try {
+      this.dc.send(data)
+    } catch (error: any) {
+      const errorMessage = String(error?.message || error)
+      
+      if (/message too large/i.test(errorMessage)) {
+        // Reduce chunk size and retry
+        this.chunkSize = Math.max(this.MIN_CHUNK_SIZE, Math.floor(this.chunkSize / 2))
+        console.log(`📏 Reduced chunk size to ${this.chunkSize} bytes`)
+        throw error
       }
+      
+      throw error
     }
   }
 
@@ -1395,7 +1281,7 @@ export class BulletproofP2P {
     const maxMessageSize = this.getMaxMessageSize()
     const safeSize = Math.max(
       this.MIN_CHUNK_SIZE,
-      Math.min(this.DESIRED_CHUNK_SIZE, maxMessageSize - 1024) // 1KB safety margin
+      Math.min(this.DESIRED_CHUNK_SIZE, maxMessageSize - 1024)
     )
     
     this.chunkSize = safeSize
@@ -1406,7 +1292,7 @@ export class BulletproofP2P {
       this.dc.bufferedAmountLowThreshold = this.BUFFERED_AMOUNT_LOW_THRESHOLD
     }
     
-    console.log(`📏 Optimal chunk size: ${this.chunkSize} bytes, buffer thresholds: ${this.BUFFERED_AMOUNT_LOW_THRESHOLD}/${this.MAX_BUFFERED_AMOUNT}`)
+    console.log(`📏 Optimal chunk size: ${this.chunkSize} bytes`)
   }
 
   private getMaxMessageSize(): number {
@@ -1419,10 +1305,10 @@ export class BulletproofP2P {
   }
 
   private startKeepAlive(): void {
-    this.pingInterval = setInterval(() => {
+    // Keep WebSocket alive
+    this.keepAliveInterval = setInterval(() => {
       if (this.isDestroyed) return
       
-      // Send WebSocket heartbeat
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
         this.sendSignalingMessage({
           type: 'heartbeat',
@@ -1431,13 +1317,11 @@ export class BulletproofP2P {
         })
       }
       
-    }, 15000) // Every 15 seconds
+    }, this.KEEP_ALIVE_INTERVAL)
   }
 
   private startPingPong(): void {
-    // Clear existing interval
-    if (this.pingInterval) clearInterval(this.pingInterval)
-    
+    // Keep data channel alive
     this.pingInterval = setInterval(() => {
       if (this.isDestroyed || !this.dc || this.dc.readyState !== 'open') return
       
@@ -1449,13 +1333,13 @@ export class BulletproofP2P {
         id: this.generateId()
       })
       
-    }, 5000) // Ping every 5 seconds
+    }, 2000) // Ping every 2 seconds
   }
 
   private updateConnectionQuality(): void {
-    if (this.connectionLatency < 100) {
+    if (this.connectionLatency < 50) {
       this.connectionQuality = "excellent"
-    } else if (this.connectionLatency < 300) {
+    } else if (this.connectionLatency < 150) {
       this.connectionQuality = "good"
     } else {
       this.connectionQuality = "poor"
@@ -1467,32 +1351,24 @@ export class BulletproofP2P {
   private bindLifecycleHandlers(): void {
     // Online/offline detection
     window.addEventListener('online', () => {
-      console.log('🌐 Network online - attempting reconnection')
-      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-        this.connectToSignaling()
-      }
-      setTimeout(() => this.attemptPeerConnection(), 1000)
+      console.log('🌐 Network online - INSTANT RECONNECT')
+      this.connectToSignaling()
+      this.startInstantConnectionAttempts()
     })
     
     window.addEventListener('offline', () => {
       console.log('🌐 Network offline')
-      this.updateConnectionStatus("reconnecting")
+      // Don't change status - keep trying
     })
     
     // Page visibility changes
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
-        console.log('👁️ Page visible - checking connections')
-        setTimeout(() => {
-          if (!this.isDestroyed) {
-            if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-              this.connectToSignaling()
-            }
-            if (this.connectionStatus !== 'connected') {
-              this.attemptPeerConnection()
-            }
-          }
-        }, 1000)
+        console.log('👁️ Page visible - INSTANT RECONNECT')
+        if (!this.isConnected) {
+          this.connectToSignaling()
+          this.startInstantConnectionAttempts()
+        }
       }
     })
   }
@@ -1521,7 +1397,7 @@ export class BulletproofP2P {
   private updateConnectionStatus(status: ConnectionStatus): void {
     if (this.connectionStatus !== status) {
       this.connectionStatus = status
-      console.log(`🔗 Connection status: ${status}`)
+      console.log(`⚡ Connection status: ${status}`)
       this.onConnectionStatusChange?.(status)
     }
   }
@@ -1529,7 +1405,7 @@ export class BulletproofP2P {
   private updateSignalingStatus(status: ConnectionStatus): void {
     if (this.signalingStatus !== status) {
       this.signalingStatus = status
-      console.log(`📡 Signaling status: ${status}`)
+      console.log(`⚡ Signaling status: ${status}`)
       this.onSignalingStatusChange?.(status)
     }
   }
@@ -1537,10 +1413,6 @@ export class BulletproofP2P {
   private updateFileTransfers(): void {
     const transfers = Array.from(this.fileTransfers.values())
     this.onFileTransferUpdate?.(transfers)
-  }
-
-  private sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms))
   }
 
   private generateId(): string {
