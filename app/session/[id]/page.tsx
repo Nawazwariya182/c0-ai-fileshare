@@ -32,7 +32,7 @@ interface ChatMessage {
   type: 'text' | 'clipboard'
 }
 
-const DEFAULT_DJANGO_URL = 'https://YOUR-DJANGO.onrender.com' // TODO: set to your Render URL
+const DEFAULT_DJANGO_URL = 'https://django-encrypt.onrender.com' // TODO: set to your Render URL
 
 // Server demands: /^[A-Z0-9]{6}$/
 // We uppercase and strip non-alnum; we also trim to 6 chars to be permissive for lowercase inputs.
@@ -71,6 +71,11 @@ export default function SessionPage() {
   const params = useParams()
   const rawId = params?.id as string | undefined
   const { id: safeSessionId, valid: sessionValid } = useMemo(() => sanitizeSessionId(rawId), [rawId])
+
+  const uid = useMemo(
+    () => (sessionValid ? getOrCreateSessionUserId(safeSessionId) : ''),
+    [safeSessionId, sessionValid]
+  )
 
   const [connectionStatus, setConnectionStatus] = useState<
     'connecting' | 'connected' | 'disconnected' | 'waiting' | 'reconnecting'
@@ -123,11 +128,9 @@ export default function SessionPage() {
       setConnectionStatus('connecting')
       return
     }
-    setError('')
+    if (!uid) return
 
-    // Ensure unique per-tab user id when unauthenticated
-    const authUserId = (user as any)?.id as string | undefined
-    const uid = authUserId || getOrCreateSessionUserId(safeSessionId)
+    setError('')
 
     const p2p = new BulletproofP2P(safeSessionId, uid)
     p2pRef.current = p2p
@@ -157,7 +160,7 @@ export default function SessionPage() {
     return () => {
       p2p.destroy()
     }
-  }, [user, safeSessionId, sessionValid])
+  }, [safeSessionId, sessionValid, uid])
 
   const handleSetEncryptionServer = () => {
     const current = (typeof window !== 'undefined' && window.localStorage.getItem('DJANGO_BASE_URL')) || ''
@@ -244,9 +247,7 @@ export default function SessionPage() {
     const prev = p2pRef.current
     prev.destroy()
     setTimeout(() => {
-      if (!sessionValid) return
-      // Maintain the same userId in this tab for reconnection
-      const uid = (user as any)?.id || getOrCreateSessionUserId(safeSessionId)
+      if (!sessionValid || !uid) return
       const p2p = new BulletproofP2P(safeSessionId, uid)
       p2pRef.current = p2p
       p2p.onConnectionStatusChange = (status) => setConnectionStatus(status as any)
@@ -611,7 +612,7 @@ export default function SessionPage() {
           isOpen={showPreview}
           onClose={() => setShowPreview(false)}
           onSendFiles={handlePreviewSend}
-          onCancel={() => ()=> setPreviewFiles([])}
+          onCancel={() => () => setPreviewFiles([])}
           onAddMoreFiles={() => fileInputRef.current?.click()}
         />
       </div>
