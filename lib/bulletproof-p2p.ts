@@ -109,6 +109,7 @@ interface EncryptionInfo {
 export class BulletproofP2P {
   private sessionId: string
   private userId: string
+  private debugMode: boolean = false
 
   private ws: WebSocket | null = null
   private pc: RTCPeerConnection | null = null
@@ -190,9 +191,10 @@ export class BulletproofP2P {
     rtcpMuxPolicy: 'require'
   }
 
-  constructor(sessionId: string, userId: string) {
+  constructor(sessionId: string, userId: string, debugMode: boolean = false) {
     this.sessionId = sessionId
     this.userId = userId
+    this.debugMode = debugMode
     this.initSignalingServers()
     console.log(`🚀 BulletproofP2P for session ${sessionId}`)
   }
@@ -333,6 +335,14 @@ export class BulletproofP2P {
   getFileTransfers(): FileTransfer[] { return Array.from(this.fileTransfers.values()) }
   getChatMessages(): ChatMessage[] { return [] }
 
+  setDebugMode(enabled: boolean): void {
+    this.debugMode = enabled
+  }
+
+  isDebugMode(): boolean {
+    return this.debugMode
+  }
+
   destroy(): void {
     console.log('🛑 Destroying P2P...')
     this.isDestroyed = true
@@ -443,81 +453,182 @@ export class BulletproofP2P {
   }
 
   private async onSignaling(message: SignalingMessage): Promise<void> {
-    if (this.connectionStatus !== 'connected') this.setConnecting()
+    if (this.debugMode) {
+      console.log(`📨 Signaling message:`, message.type, message)
+    }
 
     switch (message.type) {
       case 'connected':
+        console.log('🔗 Connected to signaling server')
         break
 
       case 'joined':
+        console.log(`👋 Joined session. Initiator: ${message.isInitiator}, Users: ${message.userCount}`)
         this.isInitiator = message.isInitiator ?? false
         this.userCount = message.userCount ?? 0
         this.onUserCountChange?.(this.userCount)
-        if (this.userCount >= 2) this.ensurePeer()
-        this.setConnecting()
+        
+        // Only set connecting if we have peers to connect to
+        if (this.userCount >= 2) {
+          this.setConnecting()
+          // Small delay to ensure both peers are ready
+          setTimeout(() => {
+            if (!this.isDestroyed && this.userCount >= 2) {
+              this.ensurePeer()
+            }
+          }, 100)
+        } else {
+          this.connectionStatus = "waiting"
+          this.onConnectionStatusChange?.(this.connectionStatus)
+        }
         break
 
       case 'user-joined':
+        console.log(`👤 User joined. Total users: ${message.userCount}`)
         this.userCount = message.userCount ?? 0
         this.onUserCountChange?.(this.userCount)
-        if (this.userCount >= 2) this.ensurePeer()
-        this.setConnecting()
+        
+        if (this.userCount >= 2) {
+          this.setConnecting()
+          // Give time for the new user to settle
+          setTimeout(() => {
+            if (!this.isDestroyed && this.userCount >= 2) {
+              this.ensurePeer()
+            }
+          }, 200)
+        }
         break
 
       case 'user-left':
+        console.log(`👋 User left. Remaining users: ${message.userCount}`)
         this.userCount = message.userCount ?? 0
         this.onUserCountChange?.(this.userCount)
-        this.setConnecting()
-        this.resetPeer('peer left')
+        
+        if (this.userCount < 2) {
+          this.connectionStatus = "waiting"
+          this.onConnectionStatusChange?.(this.connectionStatus)
+          this.resetPeer('peer left')
+        } else {
+          this.setConnecting()
+          // Try to reconnect with remaining peers
+          setTimeout(() => {
+            if (!this.isDestroyed && this.userCount >= 2) {
+              this.ensurePeer()
+            }
+          }, 500)
+        }
         break
 
       case 'offer':
+        console.log('📥 Received offer')
         await this.onOffer(message)
         break
 
       case 'answer':
+        console.log('📥 Received answer')
         await this.onAnswer(message)
         break
 
       case 'ice-candidate':
+        if (this.debugMode) {
+          console.log('🧊 Received ICE candidate')
+        }
         await this.onRemoteIce(message)
         break
 
       case 'error':
-        console.log('⚠️ signaling error:', message.message)
+        console.error('⚠️ Signaling error:', message.message)
+        this.onError?.(`Signaling error: ${message.message}`)
         break
+
+      default:
+        console.log('❓ Unknown signaling message:', message.type)
     }
   }
 
   // Peer
   private ensurePeer(): void {
-    if (this.pc && (this.pc.connectionState === 'connected' || this.pc.connectionState === 'connecting')) return
+    if (this.debugMode) {
+      console.log(`🔍 ensurePeer called. UserCount: ${this.userCount}, PC state: ${this.pc?.connectionState}, DC state: ${this.dc?.readyState}`)
+    }
+
+    if (this.userCount < 2) {
+      console.log('⏸️ Not enough users for P2P connection')
+      return
+    }
+
+    // Check if we already have a working connection
+    if (this.pc && this.pc.connectionState === 'connected') {
+      console.log('✅ Already connected')
+      return
+    }
+
+    // Check if we're already in the process of connecting
+    if (this.pc && this.pc.connectionState === 'connecting') {
+      console.log('⏳ Already connecting...')
+      return
+    }
+
+    console.log(`🚀 Creating peer connection. Initiator: ${this.isInitiator}`)
     this.createPC()
+    
     if (this.isInitiator) {
-      this.dc = this.pc!.createDataChannel('bulletproof-reliable', { ordered: true })
+      console.log('📡 Creating data channel as initiator')
+      this.dc = this.pc!.createDataChannel('bulletproof-reliable', { 
+        ordered: true,
+        maxRetransmits: 3
+      })
       this.setupDC(this.dc)
-      this.negotiate()
+      
+      // Start negotiation after a brief delay to ensure PC is ready
+      setTimeout(() => {
+        if (!this.isDestroyed && this.pc) {
+          this.negotiate()
+        }
+      }, 50)
     }
   }
 
   private createPC(): void {
-    if (this.pc) { try { this.pc.close() } catch {} }
+    if (this.pc) { 
+      console.log('🔄 Closing existing peer connection')
+      try { this.pc.close() } catch {} 
+    }
+    
+    console.log('🆕 Creating new RTCPeerConnection')
     this.pc = new RTCPeerConnection(this.rtcConfig)
 
     this.pc.onicecandidate = (e) => {
       if (e.candidate) {
-        this.sendWS({ type: 'ice-candidate', candidate: e.candidate.toJSON(), sessionId: this.sessionId })
+        if (this.debugMode) {
+          console.log('🧊 Sending ICE candidate')
+        }
+        this.sendWS({ 
+          type: 'ice-candidate', 
+          candidate: e.candidate.toJSON(), 
+          sessionId: this.sessionId 
+        })
+      } else {
+        console.log('🧊 ICE gathering complete')
       }
     }
 
     this.pc.onconnectionstatechange = () => {
       const st = this.pc?.connectionState
+      console.log(`🔗 Connection state changed: ${st}`)
+      
       if (st === 'connected') {
         this.connectionStatus = "connected"
         this.onConnectionStatusChange?.(this.connectionStatus)
         this.onConnectionRecovery?.()
+        console.log('✅ P2P connection established!')
       } else if (st === 'disconnected' || st === 'failed') {
-        try { this.pc?.restartIce() } catch {}
+        console.log('❌ P2P connection failed/disconnected')
+        try { 
+          console.log('🔄 Attempting ICE restart')
+          this.pc?.restartIce() 
+        } catch {}
+        
         // Avoid full reset during active transfers
         if (this.activeTransfers.size === 0) {
           this.setReconnecting()
@@ -525,6 +636,7 @@ export class BulletproofP2P {
             this.connectionRetryTimeout = setTimeout(() => {
               this.connectionRetryTimeout = null
               if (!this.isDestroyed && this.userCount >= 2) {
+                console.log('🔄 Retrying peer connection after failure')
                 this.resetPeer('ice failure')
                 this.ensurePeer()
               }
@@ -540,57 +652,124 @@ export class BulletproofP2P {
 
     this.pc.oniceconnectionstatechange = () => {
       const st = this.pc?.iceConnectionState
+      console.log(`🧊 ICE connection state: ${st}`)
+      
       if (st === 'failed' || st === 'disconnected') {
         try { this.pc?.restartIce() } catch {}
         this.setReconnecting()
+      } else if (st === 'connected' || st === 'completed') {
+        console.log('🧊 ICE connection established')
       }
     }
 
     this.pc.ondatachannel = (ev) => {
+      console.log('📡 Received data channel')
       this.dc = ev.channel
       this.setupDC(this.dc)
+    }
+
+    // Add gathering state change listener
+    this.pc.onicegatheringstatechange = () => {
+      console.log(`🧊 ICE gathering state: ${this.pc?.iceGatheringState}`)
     }
   }
 
   private async negotiate(): Promise<void> {
-    if (!this.pc) return
+    if (!this.pc) {
+      console.error('❌ No peer connection for negotiation')
+      return
+    }
+    
+    console.log('🤝 Starting negotiation (creating offer)')
     try {
-      const offer = await this.pc.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: false })
+      const offer = await this.pc.createOffer({ 
+        offerToReceiveAudio: false, 
+        offerToReceiveVideo: false 
+      })
       await this.pc.setLocalDescription(offer)
-      this.sendWS({ type: 'offer', offer, sessionId: this.sessionId })
+      console.log('📤 Sending offer')
+      this.sendWS({ 
+        type: 'offer', 
+        offer, 
+        sessionId: this.sessionId 
+      })
     } catch (e) {
-      console.error('❌ negotiate offer', e)
-      this.onError?.('Failed to negotiate P2P')
+      console.error('❌ Failed to create/send offer', e)
+      this.onError?.('Failed to negotiate P2P connection')
     }
   }
 
   private async onOffer(msg: SignalingMessage): Promise<void> {
     try {
-      if (!this.pc) this.createPC()
-      if (!msg.offer) return
+      if (!this.pc) {
+        console.log('🆕 Creating PC to handle offer')
+        this.createPC()
+      }
+      if (!msg.offer) {
+        console.error('❌ Received offer message without offer data')
+        return
+      }
+      
+      console.log('📥 Processing offer')
       await this.pc!.setRemoteDescription(msg.offer)
+      
+      console.log('📤 Creating and sending answer')
       const answer = await this.pc!.createAnswer()
       await this.pc!.setLocalDescription(answer)
-      this.sendWS({ type: 'answer', answer, sessionId: this.sessionId })
+      
+      this.sendWS({ 
+        type: 'answer', 
+        answer, 
+        sessionId: this.sessionId 
+      })
+      console.log('✅ Answer sent')
     } catch (e) {
-      console.error('❌ onOffer', e)
+      console.error('❌ Failed to handle offer', e)
       this.setReconnecting()
+      this.onError?.('Failed to handle connection offer')
     }
   }
 
   private async onAnswer(msg: SignalingMessage): Promise<void> {
     try {
-      if (this.pc && msg.answer) await this.pc.setRemoteDescription(msg.answer)
+      if (!this.pc) {
+        console.error('❌ No peer connection to handle answer')
+        return
+      }
+      if (!msg.answer) {
+        console.error('❌ Received answer message without answer data')
+        return
+      }
+      
+      console.log('📥 Processing answer')
+      await this.pc.setRemoteDescription(msg.answer)
+      console.log('✅ Answer processed')
     } catch (e) {
-      console.error('❌ onAnswer', e)
+      console.error('❌ Failed to handle answer', e)
       this.setReconnecting()
+      this.onError?.('Failed to handle connection answer')
     }
   }
 
   private async onRemoteIce(msg: SignalingMessage): Promise<void> {
     try {
-      if (this.pc && msg.candidate) await this.pc.addIceCandidate(new RTCIceCandidate(msg.candidate))
-    } catch (e) { console.error('❌ add ICE', e) }
+      if (!this.pc) {
+        console.warn('⚠️ Received ICE candidate but no peer connection exists')
+        return
+      }
+      if (!msg.candidate) {
+        console.error('❌ Received ICE message without candidate data')
+        return
+      }
+      
+      if (this.debugMode) {
+        console.log('🧊 Adding remote ICE candidate')
+      }
+      await this.pc.addIceCandidate(new RTCIceCandidate(msg.candidate))
+    } catch (e) {
+      console.error('❌ Failed to add ICE candidate', e)
+      // Don't trigger reconnection for ICE candidate failures as they're common
+    }
   }
 
   // DC
@@ -1025,29 +1204,39 @@ export class BulletproofP2P {
   }
 
   private setConnecting(): void {
-    if (this.connectionStatus !== 'connected') {
+    const wasConnected = this.connectionStatus === 'connected'
+    if (!wasConnected) {
       const next: ConnectionStatus = this.connectionStatus === 'reconnecting' ? 'reconnecting' : 'connecting'
       if (next !== this.connectionStatus) {
         this.connectionStatus = next
         this.onConnectionStatusChange?.(this.connectionStatus)
+        console.log(`🔄 Connection status: ${this.connectionStatus}`)
       }
     }
   }
+
   private setReconnecting(): void {
-    if (this.connectionStatus !== 'connected') {
+    if (this.connectionStatus !== 'reconnecting') {
       this.connectionStatus = 'reconnecting'
       this.onConnectionStatusChange?.(this.connectionStatus)
+      console.log('🔄 Connection status: reconnecting')
     }
   }
-  private resetPeer(_reason: string): void {
+
+  private resetPeer(reason: string): void {
+    console.log(`🔄 Resetting peer connection: ${reason}`)
+    
     if (this.activeTransfers.size > 0) {
+      console.log('⏸️ Active transfers present, only restarting ICE')
       try { this.pc?.restartIce() } catch {}
       return
     }
+    
     try { this.dc?.close() } catch {}
     try { this.pc?.close() } catch {}
     this.dc = null
     this.pc = null
+    console.log('✅ Peer connection reset complete')
   }
 
   private sleep(ms: number) { return new Promise(r => setTimeout(r, ms)) }
