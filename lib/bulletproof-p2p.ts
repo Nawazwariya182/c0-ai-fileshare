@@ -122,6 +122,8 @@ export class BulletproofP2P {
   private userCount = 2 // Always optimistic
   private isDestroyed = false
   private isConnected = false
+  private isCreatingPeerConnection = false
+  private pendingIceCandidates: RTCIceCandidateInit[] = []
 
   // INSTANT CONNECTION - NO DELAYS
   private connectionAttemptInterval: ReturnType<typeof setInterval> | null = null
@@ -366,25 +368,32 @@ export class BulletproofP2P {
   }
 
   private attemptInstantConnection(): void {
-    if (this.isDestroyed || this.isConnected) return
+    if (this.isDestroyed || this.isConnected || this.isCreatingPeerConnection) return
     
     const wsReady = this.ws && this.ws.readyState === WebSocket.OPEN
-    const pcReady = this.pc && (this.pc.connectionState === 'connected' || this.pc.connectionState === 'connecting')
+    const pcExists = this.pc && this.pc.connectionState !== 'closed' && this.pc.connectionState !== 'failed'
     const dcReady = this.dc && this.dc.readyState === 'open'
     
-    console.log(`⚡ Connection check - WS: ${wsReady}, PC: ${pcReady}, DC: ${dcReady}`)
+    console.log(`⚡ Connection check - WS: ${wsReady}, PC exists: ${pcExists}, DC: ${dcReady}`)
     
-    if (wsReady && !dcReady) {
+    if (wsReady && !pcExists && !dcReady) {
       console.log('⚡ WebSocket ready - creating peer connection INSTANTLY')
       this.createInstantPeerConnection()
     }
   }
 
   private async createInstantPeerConnection(): Promise<void> {
-    if (this.isDestroyed || this.isConnected) return
+    if (this.isDestroyed || this.isConnected || this.isCreatingPeerConnection) return
+    
+    this.isCreatingPeerConnection = true
     
     try {
       console.log('⚡ Creating INSTANT peer connection...')
+      
+      // Close existing connection if any
+      if (this.pc) {
+        this.pc.close()
+      }
       
       // Create peer connection immediately
       this.pc = new RTCPeerConnection(this.rtcConfig)
@@ -416,6 +425,12 @@ export class BulletproofP2P {
             clearInterval(this.connectionAttemptInterval)
             this.connectionAttemptInterval = null
           }
+        } else if (state === 'failed' || state === 'disconnected' || state === 'closed') {
+          console.log('💥 Peer connection failed/closed, restarting...')
+          this.isConnected = false
+          this.isCreatingPeerConnection = false
+          // Restart connection attempts after a short delay
+          setTimeout(() => this.startInstantConnectionAttempts(), 1000)
         }
       }
       
@@ -427,6 +442,12 @@ export class BulletproofP2P {
           console.log('🧊 ICE connection successful!')
           this.isConnected = true
           this.updateConnectionStatus("connected")
+        } else if (state === 'failed' || state === 'disconnected') {
+          console.log('💥 ICE connection failed, restarting...')
+          this.isConnected = false
+          this.isCreatingPeerConnection = false
+          // Restart connection attempts
+          setTimeout(() => this.startInstantConnectionAttempts(), 1000)
         }
       }
       
@@ -441,18 +462,32 @@ export class BulletproofP2P {
         console.log('🎯 Creating data channel as initiator INSTANTLY')
         this.dc = this.pc.createDataChannel('bulletproof-instant', {
           ordered: true,
-          maxRetransmits: 0 // No retransmits for speed
+          maxRetransmits: 3
         })
         this.setupInstantDataChannel(this.dc)
         
         // Create and send offer IMMEDIATELY
-        this.createInstantOffer()
+        await this.createInstantOffer()
       }
+      
+      // Process any pending ICE candidates
+      for (const candidate of this.pendingIceCandidates) {
+        try {
+          await this.pc.addIceCandidate(new RTCIceCandidate(candidate))
+          console.log('🧊 Added buffered ICE candidate')
+        } catch (error) {
+          console.warn('⚠️ Failed to add buffered ICE candidate:', error)
+        }
+      }
+      this.pendingIceCandidates = []
       
     } catch (error) {
       console.error('❌ Instant peer connection failed:', error)
-      // Try again immediately
-      setTimeout(() => this.createInstantPeerConnection(), 50)
+      this.isCreatingPeerConnection = false
+      // Try again after a short delay
+      setTimeout(() => this.createInstantPeerConnection(), 1000)
+    } finally {
+      this.isCreatingPeerConnection = false
     }
   }
 
@@ -480,8 +515,8 @@ export class BulletproofP2P {
       
     } catch (error) {
       console.error('❌ Failed to create instant offer:', error)
-      // Try again immediately
-      setTimeout(() => this.createInstantOffer(), 50)
+      // Try again after a short delay
+      setTimeout(() => this.createInstantOffer(), 1000)
     }
   }
 
@@ -507,15 +542,17 @@ export class BulletproofP2P {
     channel.onclose = () => {
       console.log('📡 Data channel closed - INSTANT RECOVERY')
       this.isConnected = false
+      this.updateConnectionStatus("connecting")
       // Immediately restart connection attempts
-      this.startInstantConnectionAttempts()
+      setTimeout(() => this.startInstantConnectionAttempts(), 500)
     }
     
     channel.onerror = (error) => {
       console.error('❌ Data channel error - INSTANT RECOVERY:', error)
       this.isConnected = false
+      this.updateConnectionStatus("connecting")
       // Immediately restart connection attempts
-      this.startInstantConnectionAttempts()
+      setTimeout(() => this.startInstantConnectionAttempts(), 500)
     }
     
     channel.onmessage = (event) => {
@@ -717,18 +754,20 @@ export class BulletproofP2P {
     if (!message.offer) return
     
     try {
-      if (!this.pc) {
+      if (!this.pc || this.pc.connectionState === 'closed' || this.pc.connectionState === 'failed') {
         await this.createInstantPeerConnection()
       }
       
+      if (!this.pc) return
+      
       console.log('📞 Setting remote description INSTANTLY (offer)')
-      await this.pc!.setRemoteDescription(message.offer)
+      await this.pc.setRemoteDescription(message.offer)
       
       console.log('📞 Creating answer INSTANTLY')
-      const answer = await this.pc!.createAnswer()
+      const answer = await this.pc.createAnswer()
       
       console.log('📞 Setting local description INSTANTLY (answer)')
-      await this.pc!.setLocalDescription(answer)
+      await this.pc.setLocalDescription(answer)
       
       // Send answer IMMEDIATELY - no waiting
       this.sendSignalingMessage({
@@ -741,8 +780,9 @@ export class BulletproofP2P {
       
     } catch (error) {
       console.error('❌ Failed to handle instant offer:', error)
-      // Try again immediately
-      setTimeout(() => this.handleInstantOffer(message), 50)
+      // Reset and try again
+      this.isCreatingPeerConnection = false
+      setTimeout(() => this.handleInstantOffer(message), 1000)
     }
   }
 
@@ -759,9 +799,16 @@ export class BulletproofP2P {
   }
 
   private async handleInstantIceCandidate(message: SignalingMessage): Promise<void> {
-    if (!this.pc || !message.candidate) return
+    if (!message.candidate) return
     
     try {
+      if (!this.pc || this.pc.remoteDescription === null) {
+        // Buffer the candidate if we don't have a peer connection or remote description yet
+        console.log('🧊 Buffering ICE candidate for later')
+        this.pendingIceCandidates.push(message.candidate)
+        return
+      }
+      
       const candidate = new RTCIceCandidate(message.candidate)
       await this.pc.addIceCandidate(candidate)
       console.log('🧊 ICE candidate added INSTANTLY')
