@@ -34,35 +34,44 @@ interface ChatMessage {
 
 const DEFAULT_DJANGO_URL = 'https://django-encrypt.onrender.com' // TODO: set to your Render URL
 
-// Server demands: /^[A-Z0-9]{6}$/
-// We uppercase and strip non-alnum; we also trim to 6 chars to be permissive for lowercase inputs.
-// If original is clearly not 6 chars even after sanitization, we mark invalid and don't connect.
+// The server validates: /^[A-Z0-9]{6}$/
+// Uppercase, remove non-alnum, trim to 6. If < 6 after sanitize -> invalid.
 function sanitizeSessionId(raw: string | undefined): { id: string; valid: boolean } {
   const s = (raw || '').toString().toUpperCase().replace(/[^A-Z0-9]/g, '')
   if (s.length === 6) return { id: s, valid: true }
-  // Soft default: if longer than 6 but starts with 6 valid chars, trim
   if (s.length > 6) return { id: s.slice(0, 6), valid: true }
   return { id: s, valid: false }
 }
 
-// Generate a per-tab, per-session unique user id.
-// Using sessionStorage keeps identity across reloads of the same tab (reconnect),
-// but two tabs/devices will have different ids so the server counts 2/2.
-function getOrCreateSessionUserId(sessionId: string): string {
+// Stable per-session user id in localStorage:
+// - Survives reloads (prevents "Session full" on quick reload).
+// - On second device, different storage -> different id -> counts as 2/2.
+// Note: Two tabs on the same device will share the same id (treated as reconnection).
+function getOrCreateStableUserId(sessionId: string): string {
   const key = `bp2p-uid-${sessionId}`
   try {
-    const existing = sessionStorage.getItem(key)
+    const existing = localStorage.getItem(key)
     if (existing) return existing
-    const fresh = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
-      ? crypto.randomUUID()
-      : Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)
-    sessionStorage.setItem(key, fresh)
+    const fresh =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? (crypto as any).randomUUID()
+        : Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)
+    localStorage.setItem(key, fresh)
     return fresh
   } catch {
-    // Fallback if sessionStorage is unavailable
-    return (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
-      ? crypto.randomUUID()
-      : Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)
+    // Fallback if localStorage blocked: use sessionStorage; if that fails, random each load
+    try {
+      const sExisting = sessionStorage.getItem(key)
+      if (sExisting) return sExisting
+      const fresh =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? (crypto as any).randomUUID()
+          : Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)
+      sessionStorage.setItem(key, fresh)
+      return fresh
+    } catch {
+      return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)
+    }
   }
 }
 
@@ -72,10 +81,8 @@ export default function SessionPage() {
   const rawId = params?.id as string | undefined
   const { id: safeSessionId, valid: sessionValid } = useMemo(() => sanitizeSessionId(rawId), [rawId])
 
-  const uid = useMemo(
-    () => (sessionValid ? getOrCreateSessionUserId(safeSessionId) : ''),
-    [safeSessionId, sessionValid]
-  )
+  // Compute a stable uid for this session (do NOT use auth id for signaling)
+  const uid = useMemo(() => (sessionValid ? getOrCreateStableUserId(safeSessionId) : ''), [safeSessionId, sessionValid])
 
   const [connectionStatus, setConnectionStatus] = useState<
     'connecting' | 'connected' | 'disconnected' | 'waiting' | 'reconnecting'
@@ -120,7 +127,7 @@ export default function SessionPage() {
     } catch {}
   }, [])
 
-  // Initialize P2P once we have a valid session code
+  // Initialize P2P
   useEffect(() => {
     if (!sessionValid) {
       setError('Invalid session code. Please use a 6-character alphanumeric code (e.g., ABC123).')
@@ -157,7 +164,13 @@ export default function SessionPage() {
 
     p2p.initialize()
 
+    // Proactively close WS/DC on unload to prevent ghost users (server cleans faster)
+    const cleanup = () => p2p.destroy()
+    window.addEventListener('beforeunload', cleanup)
+    window.addEventListener('pagehide', cleanup) // iOS Safari
     return () => {
+      window.removeEventListener('beforeunload', cleanup)
+      window.removeEventListener('pagehide', cleanup)
       p2p.destroy()
     }
   }, [safeSessionId, sessionValid, uid])
@@ -205,12 +218,17 @@ export default function SessionPage() {
         setShowPreview(true)
       }
     }
+    // Reset input to allow reselecting the same file
     e.target.value = ''
   }
 
   const handlePreviewSend = async (files: File[]) => {
     if (p2pRef.current) {
-      await p2pRef.current.sendFiles(files)
+      try {
+        await p2pRef.current.sendFiles(files)
+      } catch (err) {
+        setError('Failed to start file send.')
+      }
     }
     setPreviewFiles([])
     setShowPreview(false)
@@ -413,8 +431,10 @@ export default function SessionPage() {
                     setDragOver(true)
                   }}
                   onDragLeave={() => setDragOver(false)}
-                  onClick={() => {
-                    if (isMobile && connectionStatus === 'connected' && sessionValid) fileInputRef.current?.click()
+                  onClick={(e) => {
+                    // On mobile, allow entire area to open picker, but don’t bubble to Document
+                    e.stopPropagation()
+                    if (connectionStatus === 'connected' && sessionValid) fileInputRef.current?.click()
                   }}
                 >
                   <Upload className="w-12 md:w-16 h-12 md:h-16 mx-auto mb-4" />

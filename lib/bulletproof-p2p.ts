@@ -179,7 +179,6 @@ export class BulletproofP2P {
   }
 
   constructor(sessionId: string, userId: string) {
-    // Session ID expected by server: /^[A-Z0-9]{6}$/
     this.sessionId = sessionId
     this.userId = userId
     this.initSignalingServers()
@@ -206,40 +205,82 @@ export class BulletproofP2P {
     } catch {}
     return 'http://localhost:8000'
   }
-  private async getDjangoKey(): Promise<string> {
-    const base = this.getDjangoBaseUrl().replace(/\/$/, '')
-    const res = await fetch(`${base}/api/key`, { method: 'GET' })
-    if (!res.ok) throw new Error(`Django /key failed ${res.status}`)
-    const json = (await res.json().catch(() => null as any)) as any
-    const key = json?.key
-    if (!key) throw new Error('Invalid key payload')
-    return key
+
+  private isMixedContentBlocked(url: string) {
+    try {
+      const pageHttps = window.location.protocol === 'https:'
+      const target = new URL(url)
+      return pageHttps && target.protocol === 'http:'
+    } catch {
+      return false
+    }
   }
+
+  private async getDjangoKey(timeoutMs = 6000): Promise<string> {
+    const base = this.getDjangoBaseUrl().replace(/\/$/, '')
+    if (this.isMixedContentBlocked(base)) {
+      throw new Error('Mixed content: Django URL must be https when page is https')
+    }
+    const ctrl = new AbortController()
+    const to = setTimeout(() => ctrl.abort('timeout'), timeoutMs)
+    try {
+      const res = await fetch(`${base}/api/key`, { method: 'GET', signal: ctrl.signal as any })
+      if (!res.ok) throw new Error(`Django /key failed ${res.status}`)
+      const json = (await res.json().catch(() => null as any)) as any
+      const key = json?.key
+      if (!key) throw new Error('Invalid key payload')
+      return key
+    } finally {
+      clearTimeout(to)
+    }
+  }
+
   private async encryptViaDjango(file: File): Promise<{ blob: Blob; key: string } | null> {
     try {
       const base = this.getDjangoBaseUrl().replace(/\/$/, '')
+      if (this.isMixedContentBlocked(base)) {
+        console.warn('⚠️ Mixed content, skipping encryption (use https Django URL)')
+        return null
+      }
       const key = await this.getDjangoKey()
       const fd = new FormData()
       fd.append('file', file, file.name)
       fd.append('key', key)
-      const res = await fetch(`${base}/api/encrypt`, { method: 'POST', body: fd })
-      if (!res.ok) throw new Error(`Encrypt failed ${res.status}`)
-      const blob = await res.blob()
-      return { blob, key }
+      const ctrl = new AbortController()
+      const to = setTimeout(() => ctrl.abort('timeout'), Math.max(120000, Math.min(600000, file.size / 1000))) // 2-600s
+      try {
+        const res = await fetch(`${base}/api/encrypt`, { method: 'POST', body: fd, signal: ctrl.signal as any })
+        if (!res.ok) throw new Error(`Encrypt failed ${res.status}`)
+        const blob = await res.blob()
+        return { blob, key }
+      } finally {
+        clearTimeout(to)
+      }
     } catch (e) {
       console.warn('⚠️ Encrypt via Django failed, falling back to plain send', e)
       return null
     }
   }
+
   private async decryptViaDjango(blob: Blob, key: string): Promise<Blob | null> {
     try {
       const base = this.getDjangoBaseUrl().replace(/\/$/, '')
+      if (this.isMixedContentBlocked(base)) {
+        console.warn('⚠️ Mixed content, skipping decrypt (use https Django URL)')
+        return null
+      }
       const fd = new FormData()
       fd.append('file', blob, 'file.enc')
       fd.append('key', key)
-      const res = await fetch(`${base}/api/decrypt`, { method: 'POST', body: fd })
-      if (!res.ok) throw new Error(`Decrypt failed ${res.status}`)
-      return await res.blob()
+      const ctrl = new AbortController()
+      const to = setTimeout(() => ctrl.abort('timeout'), Math.max(120000, Math.min(600000, blob.size / 1000)))
+      try {
+        const res = await fetch(`${base}/api/decrypt`, { method: 'POST', body: fd, signal: ctrl.signal as any })
+        if (!res.ok) throw new Error(`Decrypt failed ${res.status}`)
+        return await res.blob()
+      } finally {
+        clearTimeout(to)
+      }
     } catch (e) {
       console.error('❌ Decrypt via Django failed', e)
       return null
@@ -466,7 +507,6 @@ export class BulletproofP2P {
     if (this.connectionStatus !== 'connected') this.setConnecting()
     switch (message.type) {
       case 'connected':
-        // server handshake ack
         break
       case 'joined':
         this.isInitiator = message.isInitiator ?? false
@@ -482,7 +522,6 @@ export class BulletproofP2P {
         this.setConnecting()
         break
       case 'p2p-ready':
-        // server indicates both peers present
         this.ensurePeer()
         break
       case 'user-left':
@@ -501,16 +540,22 @@ export class BulletproofP2P {
         await this.onRemoteIce(message)
         break
       case 'keep-alive-ack':
-        // no-op
-        break
       case 'session-expired':
-        this.onError?.('Session expired - please reconnect')
-        this.setReconnecting()
+        if (message.type === 'session-expired') {
+          this.onError?.('Session expired - please reconnect')
+          this.setReconnecting()
+        }
         break
-      case 'error':
-        console.log('⚠️ signaling error:', message.message)
-        this.onError?.(String(message.message || 'Signaling error'))
+      case 'error': {
+        const m = String(message.message || 'Signaling error')
+        console.log('⚠️ signaling error:', m)
+        this.onError?.(m)
+        // Do not spam reconnect on "Session is full" – wait for user action
+        if (/Session is full/i.test(m)) {
+          this.setConnecting()
+        }
         break
+      }
     }
   }
 
@@ -519,6 +564,7 @@ export class BulletproofP2P {
     if (this.pc && (this.pc.connectionState === 'connected' || this.pc.connectionState === 'connecting')) return
     this.createPC()
     if (this.isInitiator) {
+      // Reliable ordered channel; on iOS, negotiated=false is more compatible
       this.dc = this.pc!.createDataChannel('bulletproof-reliable', { ordered: true })
       this.setupDC(this.dc)
       this.negotiate()
@@ -592,6 +638,7 @@ export class BulletproofP2P {
       this.onError?.('Failed to negotiate P2P')
     }
   }
+
   private async onOffer(msg: SignalingMessage): Promise<void> {
     try {
       if (!this.pc) this.createPC()
@@ -605,6 +652,7 @@ export class BulletproofP2P {
       this.setReconnecting()
     }
   }
+
   private async onAnswer(msg: SignalingMessage): Promise<void> {
     try {
       if (this.pc && msg.answer) await this.pc.setRemoteDescription(msg.answer)
@@ -613,6 +661,7 @@ export class BulletproofP2P {
       this.setReconnecting()
     }
   }
+
   private async onRemoteIce(msg: SignalingMessage): Promise<void> {
     try {
       if (this.pc && msg.candidate) await this.pc.addIceCandidate(new RTCIceCandidate(msg.candidate))
@@ -624,6 +673,13 @@ export class BulletproofP2P {
   // DC
   private setupDC(channel: RTCDataChannel): void {
     channel.binaryType = 'arraybuffer'
+    // Mobile-safe flow control: lower thresholds
+    const isMobile = /Mobile|Android|iPhone|iPad/i.test(navigator.userAgent)
+    if (isMobile) {
+      this.DESIRED_CHUNK_SIZE = 96 * 1024 // ~96KB on mobile
+      this.MAX_BUFFERED_AMOUNT = 2 * 1024 * 1024 // 2MB
+      this.BUFFERED_AMOUNT_LOW_THRESHOLD = 256 * 1024 // 256KB
+    }
     channel.bufferedAmountLowThreshold = this.BUFFERED_AMOUNT_LOW_THRESHOLD
     channel.onopen = () => {
       this.selectChunkSize()
@@ -748,7 +804,7 @@ export class BulletproofP2P {
         const maxForPayload = Math.max(
           this.MIN_CHUNK_SIZE,
           Math.min(this.chunkSize, sctpMax - 4 - headerProbe.length - 32),
-        ) // 32B headroom
+        )
         const size = Math.min(maxForPayload, file.size - offset)
         const ab = await file.slice(offset, offset + size).arrayBuffer()
 
@@ -1000,6 +1056,7 @@ export class BulletproofP2P {
   }
   private selectChunkSize(): void {
     const max = this.getSctpMaxMessageSize()
+    // Keep a headroom; on mobile we already lowered desired/max buffers
     const safe = Math.max(this.MIN_CHUNK_SIZE, Math.min(this.DESIRED_CHUNK_SIZE, max - 2048))
     this.chunkSize = safe
     this.BUFFERED_AMOUNT_LOW_THRESHOLD = Math.min(2 * 1024 * 1024, Math.floor(this.chunkSize * 4))
