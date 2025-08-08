@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { useUser } from "@clerk/nextjs"
+import { useUser } from "@/hooks/useUser"
 import { QRCodeSVG } from "qrcode.react"
 import { Copy, Users, Wifi } from 'lucide-react'
 import { useRouter } from "next/navigation"
