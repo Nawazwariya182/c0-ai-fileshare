@@ -22,7 +22,7 @@ interface ClientInfo {
 
 interface IncomingFileData {
   chunks: Map<number, ArrayBuffer>
-  totalChunks: number // kept for compatibility, not relied on
+  totalChunks: number // compatibility, not relied on
   fileName: string
   fileSize: number
   fileType: string
@@ -108,6 +108,7 @@ export class BulletproofP2P {
   private currentSpeed = 0
   private userCount = 0
   private isDestroyed = false
+  private lastSuccessfulConnection = 0
 
   // Timers
   private connectionRetryTimeout: ReturnType<typeof setTimeout> | null = null
@@ -119,7 +120,7 @@ export class BulletproofP2P {
   private fileTransfers = new Map<string, FileTransfer>()
   private incomingFiles = new Map<string, IncomingFileData>()
   private sendingFiles = new Map<string, File>() // fileId -> File
-  private activeTransfers = new Set<string>()
+  private activeTransfers = new Set<string>() // guarded to avoid resets during transfer
 
   // Callbacks
   public onConnectionStatusChange?: (status: ConnectionStatus) => void
@@ -137,12 +138,12 @@ export class BulletproofP2P {
   private connectionLatency = 0
 
   // High-throughput flow control (adaptive)
-  private DESIRED_CHUNK_SIZE = 256 * 1024 // target 256KB
+  private DESIRED_CHUNK_SIZE = 256 * 1024 // 256KB target
   private MIN_CHUNK_SIZE = 16 * 1024 // 16KB floor
-  private chunkSize = 64 * 1024 // will adapt after DC open
-  private MAX_BUFFERED_AMOUNT = 8 * 1024 * 1024 // 8MB
-  private BUFFERED_AMOUNT_LOW_THRESHOLD = 1 * 1024 * 1024 // 1MB
-  private PROGRESS_UPDATE_INTERVAL = 300
+  private chunkSize = 64 * 1024 // set after DC opens
+  private MAX_BUFFERED_AMOUNT = 8 * 1024 * 1024 // 8MB cap
+  private BUFFERED_AMOUNT_LOW_THRESHOLD = 1 * 1024 * 1024 // 1MB low watermark
+  private PROGRESS_UPDATE_INTERVAL = 250
 
   // ICE recovery
   private ICE_RECOVERY_DELAY = 1500
@@ -160,7 +161,6 @@ export class BulletproofP2P {
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
       { urls: 'stun:stun2.l.google.com:19302' },
-      // OpenRelay TURN
       {
         urls: [
           'turn:openrelay.metered.ca:80?transport=udp',
@@ -197,9 +197,11 @@ export class BulletproofP2P {
       this.onError?.('Not connected - cannot send files')
       return
     }
+
     for (const file of files) {
       const fileId = this.id()
       this.sendingFiles.set(fileId, file)
+
       const transfer: FileTransfer = {
         id: fileId,
         name: file.name,
@@ -215,7 +217,7 @@ export class BulletproofP2P {
       this.fileTransfers.set(fileId, transfer)
       this.updateFileTransfers()
 
-      // Offer
+      // Send offer
       this.sendP2P({
         type: 'file-offer',
         data: { fileId, fileName: file.name, fileSize: file.size, fileType: file.type },
@@ -408,7 +410,7 @@ export class BulletproofP2P {
     if (this.pc && (this.pc.connectionState === 'connected' || this.pc.connectionState === 'connecting')) return
     this.createPC()
     if (this.isInitiator) {
-      this.dc = this.pc!.createDataChannel('bulletproof-reliable', { ordered: true })
+      this.dc = this.pc!.createDataChannel('bulletproof-reliable', { ordered: true }) // reliable by default
       this.setupDC(this.dc)
       this.negotiate()
     }
@@ -429,18 +431,24 @@ export class BulletproofP2P {
       if (st === 'connected') {
         this.connectionStatus = "connected"
         this.onConnectionStatusChange?.(this.connectionStatus)
+        this.lastSuccessfulConnection = Date.now()
         this.onConnectionRecovery?.()
       } else if (st === 'disconnected' || st === 'failed') {
+        // Do NOT reset while actively transferring; only restart ICE
         try { this.pc?.restartIce() } catch {}
-        this.setReconnecting()
-        if (!this.connectionRetryTimeout) {
-          this.connectionRetryTimeout = setTimeout(() => {
-            this.connectionRetryTimeout = null
-            if (!this.isDestroyed && this.userCount >= 2) {
-              this.resetPeer('ice failure')
-              this.ensurePeer()
-            }
-          }, this.ICE_RECOVERY_DELAY)
+        if (this.activeTransfers.size === 0) {
+          this.setReconnecting()
+          if (!this.connectionRetryTimeout) {
+            this.connectionRetryTimeout = setTimeout(() => {
+              this.connectionRetryTimeout = null
+              if (!this.isDestroyed && this.userCount >= 2) {
+                this.resetPeer('ice failure')
+                this.ensurePeer()
+              }
+            }, this.ICE_RECOVERY_DELAY)
+          }
+        } else {
+          this.setReconnecting() // show reconnecting but keep PC for transfer to finish/recover
         }
       } else if (st === 'connecting' || st === 'new') {
         this.setConnecting()
@@ -511,6 +519,7 @@ export class BulletproofP2P {
       this.selectChunkSize()
       this.connectionStatus = "connected"
       this.onConnectionStatusChange?.(this.connectionStatus)
+      this.lastSuccessfulConnection = Date.now()
     }
     channel.onclose = () => this.setReconnecting()
     channel.onerror = (e) => { console.error('❌ DC error', e); this.setReconnecting() }
@@ -562,6 +571,7 @@ export class BulletproofP2P {
 
   // File pipeline
   private handleFileOffer(data: FileOfferData): void {
+    // Auto-accept
     this.sendP2P({
       type: 'file-accept',
       data: { fileId: data.fileId },
@@ -579,6 +589,7 @@ export class BulletproofP2P {
     await this.sendFileAdaptive(file, data.fileId)
   }
 
+  // Adaptive sender: offset streaming, SCTP-safe sizing, backpressure, retries
   private async sendFileAdaptive(file: File, fileId: string): Promise<void> {
     if (!this.dc || this.dc.readyState !== 'open') {
       this.onError?.(`Connection lost before sending ${file.name}`)
@@ -608,30 +619,30 @@ export class BulletproofP2P {
           continue
         }
 
-        // Compute slice within SCTP limit
-        const maxForPayload = this.chunkSize - 1024 // reserve header budget
-        const size = Math.max(this.MIN_CHUNK_SIZE, Math.min(maxForPayload, file.size - offset))
-        const blob = file.slice(offset, offset + size)
-        const ab = await blob.arrayBuffer()
+        // Compute max payload within SCTP limit
+        const sctpMax = this.getSctpMaxMessageSize()
+        const headerProbe = new TextEncoder().encode(JSON.stringify({ fileId, seq, fileName: file.name, fileSize: file.size, fileType: file.type }))
+        const maxForPayload = Math.max(this.MIN_CHUNK_SIZE, Math.min(this.chunkSize, sctpMax - 4 - headerProbe.length - 32)) // 32B safety
 
+        const size = Math.min(maxForPayload, file.size - offset)
+        const ab = await file.slice(offset, offset + size).arrayBuffer()
+
+        // Build message
         const header = { fileId, seq, fileName: file.name, fileSize: file.size, fileType: file.type }
         const headerBytes = new TextEncoder().encode(JSON.stringify(header))
+        const totalLen = 4 + headerBytes.length + ab.byteLength
 
-        // Ensure message <= maxMessageSize
-        const sctpMax = this.getSctpMaxMessageSize()
-        if (4 + headerBytes.length + ab.byteLength > sctpMax) {
-          // reduce chunk size and retry without advancing offset
+        // If still too big, shrink chunk and retry loop without advancing
+        if (totalLen > sctpMax) {
           this.chunkSize = Math.max(this.MIN_CHUNK_SIZE, Math.floor(this.chunkSize / 2))
-          // loop continues to retry with smaller chunk
           continue
         }
 
-        const out = new Uint8Array(4 + headerBytes.length + ab.byteLength)
+        const out = new Uint8Array(totalLen)
         new DataView(out.buffer).setUint32(0, headerBytes.length, true)
         out.set(headerBytes, 4)
         out.set(new Uint8Array(ab), 4 + headerBytes.length)
 
-        // Send with retry on message-too-large/operation error
         await this.safeSend(out.buffer)
 
         offset += ab.byteLength
@@ -667,9 +678,15 @@ export class BulletproofP2P {
       console.log(`✅ Sent ${file.name} @ ${this.prettySpeed(transfer.speed || 0)}`)
     } catch (e) {
       console.error(`❌ Failed to send ${file.name}`, e)
-      transfer.status = "error"
+      // Do NOT mark as error if DC hiccuped during active transfer; let ICE restart attempt recovery
+      if (this.dc && this.dc.readyState === 'open') {
+        transfer.status = "error"
+        this.onError?.(`Failed to send ${file.name}`)
+      } else {
+        // Leave as transferring while reconnection attempts run; UI remains reconnecting
+        transfer.status = "transferring"
+      }
       this.updateFileTransfers()
-      this.onError?.(`Failed to send ${file.name}`)
     } finally {
       this.activeTransfers.delete(fileId)
       this.sendingFiles.delete(fileId)
@@ -744,7 +761,7 @@ export class BulletproofP2P {
     const inc = this.incomingFiles.get(data.fileId)
     const t = this.fileTransfers.get(data.fileId)
 
-    // Sender ACK (no inc state) -> mark completed if exists
+    // Sender ACK (no inc state)
     if (!inc) {
       if (t && t.direction === 'sending') {
         t.status = 'completed'
@@ -754,9 +771,9 @@ export class BulletproofP2P {
       return
     }
 
-    // Assemble once bytes == fileSize, else wait a moment for stragglers
+    // Assemble when bytes match fileSize (or after short wait)
     if (inc.bytesReceived >= inc.fileSize) {
-      this.assemble( data.fileId )
+      this.assemble(data.fileId)
     } else {
       setTimeout(() => {
         const again = this.incomingFiles.get(data.fileId)
@@ -778,8 +795,8 @@ export class BulletproofP2P {
     const inc = this.incomingFiles.get(fileId)
     const t = this.fileTransfers.get(fileId)
     if (!inc || !t) return
+
     try {
-      // Concatenate in order of seq
       const keys = Array.from(inc.chunks.keys()).sort((a, b) => a - b)
       const parts: ArrayBuffer[] = []
       let total = 0
@@ -831,12 +848,13 @@ export class BulletproofP2P {
       } catch (e: any) {
         attempts++
         const msg = String(e?.message || e)
-        // If message too large or operation error, reduce chunk size and retry
+        // On message-too-large or operation errors, shrink chunk and retry
         if (/message too large|operation/i.test(msg)) {
           this.chunkSize = Math.max(this.MIN_CHUNK_SIZE, Math.floor(this.chunkSize / 2))
-          await this.sleep(1)
+          await this.sleep(2)
           continue
         }
+        // Backpressure fallback
         if (attempts < 3) {
           await this.waitBufferedLow()
           continue
@@ -860,23 +878,17 @@ export class BulletproofP2P {
 
   private selectChunkSize(): void {
     const max = this.getSctpMaxMessageSize()
-    // Reserve ~1KB for headers; choose as high as possible for speed
-    const safe = Math.max(this.MIN_CHUNK_SIZE, Math.min(this.DESIRED_CHUNK_SIZE, max - 1024))
+    const safe = Math.max(this.MIN_CHUNK_SIZE, Math.min(this.DESIRED_CHUNK_SIZE, max - 2048)) // 2KB headroom
     this.chunkSize = safe
-    // Aggressive thresholds when we have bigger chunks
     this.BUFFERED_AMOUNT_LOW_THRESHOLD = Math.min(2 * 1024 * 1024, Math.floor(this.chunkSize * 4))
     this.MAX_BUFFERED_AMOUNT = Math.max(8 * 1024 * 1024, this.BUFFERED_AMOUNT_LOW_THRESHOLD * 4)
     if (this.dc) this.dc.bufferedAmountLowThreshold = this.BUFFERED_AMOUNT_LOW_THRESHOLD
-    console.log(`📏 SCTP max=${max}B, using chunk=${this.chunkSize}B, lowThreshold=${this.BUFFERED_AMOUNT_LOW_THRESHOLD}B`)
+    console.log(`📏 SCTP max=${max}B, chunk=${this.chunkSize}B, lowThreshold=${this.BUFFERED_AMOUNT_LOW_THRESHOLD}B`)
   }
 
   private getSctpMaxMessageSize(): number {
-    // Try to read from RTCSctpTransport if available; fallback conservative default
-    // 262144 (256KB) is common in Chrome; Firefox can differ.
-    const anyPC = this.pc as any
-    const sctp = anyPC?.sctp
+    const sctp = (this.pc as any)?.sctp
     const m = typeof sctp?.maxMessageSize === 'number' && isFinite(sctp.maxMessageSize) ? sctp.maxMessageSize : 256 * 1024
-    // Ensure a sane floor
     return Math.max(64 * 1024, m)
   }
 
@@ -886,7 +898,7 @@ export class BulletproofP2P {
       if (this.isDestroyed) return
       if (this.dc && this.dc.readyState === 'open') {
         this.lastPingTime = Date.now()
-        this.sendP2P({ type: 'pong', data: { echo: false }, timestamp: Date.now(), id: this.id() }) // send small json to keep alive
+        this.sendP2P({ type: 'ping', data: { timestamp: this.lastPingTime }, timestamp: this.lastPingTime, id: this.id() })
       }
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
         this.sendWS({ type: 'keep-alive', sessionId: this.sessionId, userId: this.userId })
@@ -928,6 +940,11 @@ export class BulletproofP2P {
     }
   }
   private resetPeer(reason: string): void {
+    if (this.activeTransfers.size > 0) {
+      // Avoid full reset during active transfers; rely on ICE restart
+      try { this.pc?.restartIce() } catch {}
+      return
+    }
     try { this.dc?.close() } catch {}
     try { this.pc?.close() } catch {}
     this.dc = null
