@@ -375,7 +375,7 @@ export default function SessionPage() {
                     </Button>
                     <input ref={fileInputRef} type="file" multiple onChange={handleFileSelect} className="hidden" accept="*/*" />
                   </div>
-                  <p className="text-xs md:text-sm font-bold mt-4 text-gray-600">{'Max 100MB per file • Multi-file support • Bulletproof transfer'}</p>
+                  <p className="text-xs md:text-sm font-bold mt-4 text-gray-600">{'Max 100MB per file • Multi-file support • Transfer with Encryption • AI based Checking'}</p>
                 </div>
               </CardContent>
             </Card>
@@ -421,7 +421,7 @@ export default function SessionPage() {
                         <CheckCircle className="w-10 md:w-12 h-10 md:h-12 mx-auto mb-4 text-green-600" />
                         <p className="font-black text-base md:text-lg text-green-800">BULLETPROOF CONNECTION!</p>
                         <p className="font-bold text-sm md:text-base">Maximum stability • Zero packet loss</p>
-                        <p className="text-xs md:text-sm mt-2">{'Quality: '}{connectionQuality} • {'Speed: '}{getSpeedDisplay()}</p>
+                        <p className="text-xs md:text-sm mt-2">{'Quality: '}{connectionQuality}</p>
                       </div>
                     )}
                     {(wsStatus === 'disconnected' || connectionStatus === 'disconnected') && (
