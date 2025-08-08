@@ -1,16 +1,16 @@
-"use client"
+'use client'
 
-import type React from "react"
-import { useState, useEffect, useRef } from "react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { useUser } from "@clerk/nextjs"
-import { useParams, useRouter } from "next/navigation"
+import { useState, useEffect, useRef } from 'react'
+import { useParams, useRouter } from 'next/navigation'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 import { Upload, Download, Users, Wifi, WifiOff, FileText, AlertTriangle, CheckCircle, X, RefreshCw, Shield, Smartphone, Monitor } from 'lucide-react'
 
-import { FilePreviewModal } from "@/components/file-preview-modal"
-import { ChatPanel } from "@/components/chat-panel"
-import { BulletproofP2P } from "@/lib/bulletproof-p2p"
+// Use the project's hook instead of Clerk to avoid missing dependency errors
+import { useUser } from '@/hooks/useUser'
+import { FilePreviewModal } from '@/components/file-preview-modal'
+import { ChatPanel } from '@/components/chat-panel'
+import { BulletproofP2P } from '@/lib/bulletproof-p2p'
 
 interface FileTransfer {
   id: string
@@ -18,8 +18,8 @@ interface FileTransfer {
   size: number
   type: string
   progress: number
-  status: "pending" | "transferring" | "completed" | "error" | "cancelled"
-  direction: "sending" | "receiving"
+  status: 'pending' | 'transferring' | 'completed' | 'error' | 'cancelled'
+  direction: 'sending' | 'receiving'
   speed?: number
 }
 
@@ -28,21 +28,25 @@ interface ChatMessage {
   content: string
   sender: string
   timestamp: Date
-  type: "text" | "clipboard"
+  type: 'text' | 'clipboard'
 }
 
 export default function SessionPage() {
   const { user } = useUser()
   const params = useParams()
   const router = useRouter()
-  const sessionId = params.id as string
+  const sessionId = params?.id as string
 
   // Simple connection states - updated to include "reconnecting"
-  const [connectionStatus, setConnectionStatus] = useState<"connecting" | "connected" | "disconnected" | "waiting" | "reconnecting">("connecting")
-  const [wsStatus, setWsStatus] = useState<"connecting" | "connected" | "disconnected" | "waiting" | "reconnecting">("connecting")
+  const [connectionStatus, setConnectionStatus] = useState<
+    'connecting' | 'connected' | 'disconnected' | 'waiting' | 'reconnecting'
+  >('connecting')
+  const [wsStatus, setWsStatus] = useState<
+    'connecting' | 'connected' | 'disconnected' | 'waiting' | 'reconnecting'
+  >('connecting')
   const [fileTransfers, setFileTransfers] = useState<FileTransfer[]>([])
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
-  const [error, setError] = useState("")
+  const [error, setError] = useState('')
   const [userCount, setUserCount] = useState(0)
   const [isMobile, setIsMobile] = useState(false)
 
@@ -51,8 +55,8 @@ export default function SessionPage() {
   const [previewFiles, setPreviewFiles] = useState<File[]>([])
   const [showPreview, setShowPreview] = useState(false)
   const [currentSpeed, setCurrentSpeed] = useState(0)
-  const [connectionQuality, setConnectionQuality] = useState<"excellent" | "good" | "poor">("excellent")
-  const [fileError, setFileError] = useState("")
+  const [connectionQuality, setConnectionQuality] = useState<'excellent' | 'good' | 'poor'>('excellent')
+  const [fileError, setFileError] = useState('')
 
   // Simple refs
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -61,57 +65,53 @@ export default function SessionPage() {
   // Initialize bulletproof P2P
   useEffect(() => {
     if (!user || !sessionId) return
+    console.log('🚀 Initializing Bulletproof P2P System')
 
-    console.log("🚀 Initializing Bulletproof P2P System")
-
-    const p2p = new BulletproofP2P(sessionId, user.id)
+    const p2p = new BulletproofP2P(sessionId, (user as any).id || 'anonymous')
     p2pRef.current = p2p
 
     // Set up event handlers
     p2p.onConnectionStatusChange = (status) => {
       console.log(`🔗 Connection status: ${status}`)
-      setConnectionStatus(status)
-      if (status === "connected") {
-        setError("")
+      // Map unknown statuses to connecting
+      setConnectionStatus(
+        status === 'connected' || status === 'reconnecting' || status === 'connecting' ? status : 'connecting'
+      )
+      if (status === 'connected') {
+        setError('')
       }
     }
-
     p2p.onSignalingStatusChange = (status) => {
       console.log(`📡 Signaling status: ${status}`)
-      setWsStatus(status)
-      if (status === "connected") {
-        setError("")
+      setWsStatus(
+        status === 'connected' || status === 'reconnecting' || status === 'connecting' ? status : 'connecting'
+      )
+      if (status === 'connected') {
+        setError('')
       }
     }
-
     p2p.onUserCountChange = (count) => {
       setUserCount(count)
     }
-
     p2p.onError = (errorMsg) => {
-      console.error("❌ P2P Error:", errorMsg)
+      console.error('❌ P2P Error:', errorMsg)
       setError(errorMsg)
     }
-
     p2p.onConnectionQualityChange = (quality) => {
       setConnectionQuality(quality)
     }
-
     p2p.onSpeedUpdate = (speed) => {
       setCurrentSpeed(speed)
     }
-
     p2p.onFileTransferUpdate = (transfers) => {
-      setFileTransfers(transfers)
+      setFileTransfers(transfers as FileTransfer[])
     }
-
     p2p.onChatMessage = (message) => {
-      setChatMessages((prev) => [...prev, message])
+      setChatMessages((prev) => [...prev, message as ChatMessage])
     }
-
     p2p.onConnectionRecovery = () => {
-      console.log("✅ Connection recovered")
-      setError("")
+      console.log('✅ Connection recovered')
+      setError('')
     }
 
     // Initialize connection
@@ -126,28 +126,25 @@ export default function SessionPage() {
   useEffect(() => {
     const checkMobile = () => {
       const isMobileDevice =
-        window.innerWidth < 768 ||
-        /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+        window.innerWidth < 768 || /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
       setIsMobile(isMobileDevice)
     }
-
     checkMobile()
-    window.addEventListener("resize", checkMobile)
-    return () => window.removeEventListener("resize", checkMobile)
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
   }, [])
 
   const MAX_FILE_SIZE = 100 * 1024 * 1024 // 100MB in bytes
-
   const validateFiles = (files: File[]) => {
-    const oversizedFiles = files.filter(file => file.size > MAX_FILE_SIZE)
-    const validFiles = files.filter(file => file.size <= MAX_FILE_SIZE)
-    
+    const oversizedFiles = files.filter((file) => file.size > MAX_FILE_SIZE)
+    const validFiles = files.filter((file) => file.size <= MAX_FILE_SIZE)
+
     if (oversizedFiles.length > 0) {
-      const fileNames = oversizedFiles.map(f => f.name).join(', ')
+      const fileNames = oversizedFiles.map((f) => f.name).join(', ')
       setFileError(`These files are too large (max 100MB): ${fileNames}`)
-      setTimeout(() => setFileError(""), 5000)
+      setTimeout(() => setFileError(''), 5000)
     }
-    
+
     return validFiles
   }
 
@@ -160,7 +157,7 @@ export default function SessionPage() {
         setShowPreview(true)
       }
     }
-    e.target.value = ""
+    e.target.value = ''
   }
 
   const handlePreviewSend = async (files: File[]) => {
@@ -171,28 +168,24 @@ export default function SessionPage() {
     setShowPreview(false)
   }
 
-  const handleSendChatMessage = (content: string, type: "text" | "clipboard") => {
+  const handleSendChatMessage = (content: string, type: 'text' | 'clipboard') => {
     if (p2pRef.current) {
-      // Create a chat message object and add it locally
       const message: ChatMessage = {
         id: Date.now().toString(),
         content,
-        sender: user?.firstName || "You",
+        sender: (user as any)?.firstName || 'You',
         timestamp: new Date(),
-        type
+        type,
       }
       setChatMessages((prev) => [...prev, message])
-      // Send through P2P if method exists
-      if ('sendMessage' in p2pRef.current) {
-        (p2pRef.current as any).sendMessage(message)
-      }
+      ;(p2pRef.current as any).sendMessage?.(message)
     }
   }
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
     setDragOver(false)
-    const files = Array.from(e.dataTransfer.files)
+    const files = Array.from(e.dataTransfer.files || [])
     if (files.length > 0) {
       const validFiles = validateFiles(files)
       if (validFiles.length > 0) {
@@ -207,19 +200,19 @@ export default function SessionPage() {
       p2pRef.current.destroy()
       setTimeout(() => {
         if (user && sessionId) {
-          const p2p = new BulletproofP2P(sessionId, user.id)
+          const p2p = new BulletproofP2P(sessionId, (user as any).id || 'anonymous')
           p2pRef.current = p2p
-          
+
           // Reattach handlers
-          p2p.onConnectionStatusChange = (status) => setConnectionStatus(status)
-          p2p.onSignalingStatusChange = (status) => setWsStatus(status)
+          p2p.onConnectionStatusChange = (status) => setConnectionStatus(status as any)
+          p2p.onSignalingStatusChange = (status) => setWsStatus(status as any)
           p2p.onUserCountChange = (count) => setUserCount(count)
           p2p.onError = (errorMsg) => setError(errorMsg)
           p2p.onConnectionQualityChange = (quality) => setConnectionQuality(quality)
           p2p.onSpeedUpdate = (speed) => setCurrentSpeed(speed)
-          p2p.onFileTransferUpdate = (transfers) => setFileTransfers(transfers)
-          p2p.onChatMessage = (message) => setChatMessages((prev) => [...prev, message])
-          
+          p2p.onFileTransferUpdate = (transfers) => setFileTransfers(transfers as any)
+          p2p.onChatMessage = (message) => setChatMessages((prev) => [...prev, message as any])
+
           p2p.initialize()
         }
       }, 1000)
@@ -227,25 +220,25 @@ export default function SessionPage() {
   }
 
   if (!user) {
-    router.push("/")
+    router.push('/')
     return null
   }
 
   const getConnectionQualityColor = () => {
     switch (connectionQuality) {
-      case "excellent":
-        return "bg-green-500"
-      case "good":
-        return "bg-yellow-500"
-      case "poor":
-        return "bg-red-500"
+      case 'excellent':
+        return 'bg-green-500'
+      case 'good':
+        return 'bg-yellow-500'
+      case 'poor':
+        return 'bg-red-500'
       default:
-        return "bg-green-500"
+        return 'bg-green-500'
     }
   }
 
   const getSpeedDisplay = () => {
-    if (currentSpeed === 0) return "0 KB/s"
+    if (currentSpeed === 0) return '0 KB/s'
     if (currentSpeed < 1024) return `${currentSpeed.toFixed(0)} B/s`
     if (currentSpeed < 1024 * 1024) return `${(currentSpeed / 1024).toFixed(1)} KB/s`
     return `${(currentSpeed / 1024 / 1024).toFixed(1)} MB/s`
@@ -259,10 +252,14 @@ export default function SessionPage() {
           <div className="flex items-center justify-center gap-2 md:gap-4 flex-wrap">
             <div
               className={`flex items-center gap-1 md:gap-2 px-2 md:px-4 py-1 md:py-2 border-2 md:border-4 border-black font-black text-xs md:text-sm ${
-                wsStatus === "connected" ? "bg-green-400" : wsStatus === "connecting" || wsStatus === "reconnecting" ? "bg-yellow-400" : "bg-red-400"
+                wsStatus === 'connected'
+                  ? 'bg-green-400'
+                  : wsStatus === 'connecting' || wsStatus === 'reconnecting'
+                  ? 'bg-yellow-400'
+                  : 'bg-red-400'
               }`}
             >
-              {wsStatus === "connected" ? (
+              {wsStatus === 'connected' ? (
                 <Wifi className="w-3 md:w-5 h-3 md:h-5" />
               ) : (
                 <WifiOff className="w-3 md:w-5 h-3 md:h-5" />
@@ -271,37 +268,34 @@ export default function SessionPage() {
               <span className="md:hidden">SIG:</span>
               {wsStatus.toUpperCase()}
             </div>
-
             <div
               className={`flex items-center gap-1 md:gap-2 px-2 md:px-4 py-1 md:py-2 border-2 md:border-4 border-black font-black text-xs md:text-sm ${
-                connectionStatus === "connected"
-                  ? "bg-green-400"
-                  : connectionStatus === "connecting" || connectionStatus === "reconnecting"
-                    ? "bg-yellow-400"
-                    : "bg-red-400"
+                connectionStatus === 'connected'
+                  ? 'bg-green-400'
+                  : connectionStatus === 'connecting' || connectionStatus === 'reconnecting'
+                  ? 'bg-yellow-400'
+                  : 'bg-red-400'
               }`}
             >
-              {connectionStatus === "connected" ? (
+              {connectionStatus === 'connected' ? (
                 <Users className="w-3 md:w-5 h-3 md:h-5" />
               ) : (
                 <WifiOff className="w-3 md:w-5 h-3 md:h-5" />
               )}
               P2P: {connectionStatus.toUpperCase()}
             </div>
-
             <div className="flex items-center gap-1 md:gap-2 px-2 md:px-4 py-1 md:py-2 border-2 md:border-4 border-black font-black bg-blue-400 text-xs md:text-sm">
               <Users className="w-3 md:w-5 h-3 md:h-5" />
               {userCount}/2
             </div>
-
             <div
               className={`flex items-center gap-1 md:gap-2 px-2 md:px-4 py-1 md:py-2 border-2 md:border-4 border-black font-black ${getConnectionQualityColor()} text-white text-xs md:text-sm`}
             >
               <Shield className="w-3 md:w-5 h-3 md:h-5" />
               {connectionQuality.toUpperCase()}
             </div>
-
-            {/* <div className="flex items-center gap-1 md:gap-2 px-2 md:px-4 py-1 md:py-2 border-2 md:border-4 border-black font-black bg-purple-400 text-xs md:text-sm">
+            {/* Speed pill (optional)
+            <div className="flex items-center gap-1 md:gap-2 px-2 md:px-4 py-1 md:py-2 border-2 md:border-4 border-black font-black bg-purple-400 text-xs md:text-sm">
               {isMobile ? <Smartphone className="w-3 h-3" /> : <Monitor className="w-3 h-3" />}
               {getSpeedDisplay()}
             </div> */}
@@ -313,7 +307,7 @@ export default function SessionPage() {
             <CardContent className="p-3 md:p-4 flex items-center gap-2">
               <AlertTriangle className="w-4 md:w-5 h-4 md:h-5 flex-shrink-0" />
               <span className="font-bold flex-1 text-sm md:text-base">{fileError}</span>
-              <Button onClick={() => setFileError("")} variant="ghost" size="sm" className="touch-target">
+              <Button onClick={() => setFileError('')} variant="ghost" size="sm" className="touch-target">
                 <X className="w-4 h-4" />
               </Button>
             </CardContent>
@@ -333,7 +327,7 @@ export default function SessionPage() {
                 <RefreshCw className="w-3 md:w-4 h-3 md:h-4 mr-1" />
                 RECONNECT
               </Button>
-              <Button onClick={() => setError("")} variant="ghost" size="sm" className="touch-target">
+              <Button onClick={() => setError('')} variant="ghost" size="sm" className="touch-target">
                 <X className="w-4 h-4" />
               </Button>
             </CardContent>
@@ -353,8 +347,8 @@ export default function SessionPage() {
               <CardContent>
                 <div
                   className={`border-4 border-dashed border-black p-4 md:p-8 text-center transition-colors ${
-                    dragOver ? "bg-green-200" : "bg-white"
-                  } ${connectionStatus !== "connected" ? "opacity-50" : ""}`}
+                    dragOver ? 'bg-green-200' : 'bg-white'
+                  } ${connectionStatus !== 'connected' ? 'opacity-50' : ''}`}
                   onDrop={handleDrop}
                   onDragOver={(e) => {
                     e.preventDefault()
@@ -362,18 +356,18 @@ export default function SessionPage() {
                   }}
                   onDragLeave={() => setDragOver(false)}
                   onClick={() => {
-                    if (isMobile && connectionStatus === "connected") {
+                    if (isMobile && connectionStatus === 'connected') {
                       fileInputRef.current?.click()
                     }
                   }}
                 >
                   <Upload className="w-12 md:w-16 h-12 md:h-16 mx-auto mb-4" />
                   <p className="text-lg md:text-xl font-black mb-2">
-                    {connectionStatus === "connected"
+                    {connectionStatus === 'connected'
                       ? isMobile
-                        ? "TAP HERE TO SELECT FILES"
-                        : "DROP FILES HERE"
-                      : "ESTABLISHING CONNECTION..."}
+                        ? 'TAP HERE TO SELECT FILES'
+                        : 'DROP FILES HERE'
+                      : 'ESTABLISHING CONNECTION...'}
                   </p>
                   {!isMobile && <p className="font-bold mb-4">or</p>}
                   <div className="relative">
@@ -382,7 +376,7 @@ export default function SessionPage() {
                         e.stopPropagation()
                         fileInputRef.current?.click()
                       }}
-                      disabled={connectionStatus !== "connected"}
+                      disabled={connectionStatus !== 'connected'}
                       className="neubrutalism-button bg-blue-500 text-white hover:bg-white hover:text-blue-500 touch-target"
                     >
                       CHOOSE FILES
@@ -393,7 +387,7 @@ export default function SessionPage() {
                       multiple
                       onChange={handleFileSelect}
                       className="hidden"
-                      accept="/"
+                      accept="*/*"
                     />
                   </div>
                   <p className="text-xs md:text-sm font-bold mt-4 text-gray-600">
@@ -409,14 +403,13 @@ export default function SessionPage() {
             <div className="lg:col-span-2">
               <Card className="neubrutalism-card bg-indigo-300 h-full">
                 <ChatPanel
-                  isConnected={connectionStatus === "connected"}
-                  currentUser={user?.firstName || "You"}
+                  isConnected={connectionStatus === 'connected'}
+                  currentUser={(user as any)?.firstName || 'You'}
                   onSendMessage={handleSendChatMessage}
                   messages={chatMessages}
                 />
               </Card>
             </div>
-
             <div className="lg:col-span-1">
               <Card className="neubrutalism-card bg-blue-300 h-full">
                 <CardHeader className="pb-3 md:pb-6">
@@ -427,17 +420,16 @@ export default function SessionPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-center space-y-4">
-                    {(wsStatus === "connecting" || wsStatus === "reconnecting") && (
+                    {(wsStatus === 'connecting' || wsStatus === 'reconnecting') && (
                       <div className="bg-yellow-200 p-4 md:p-6 border-4 border-black">
                         <div className="animate-spin w-6 md:w-8 h-6 md:h-8 border-4 border-black border-t-transparent rounded-full mx-auto mb-4"></div>
                         <p className="font-black text-base md:text-lg">
-                          {wsStatus === "reconnecting" ? "RECONNECTING TO SERVER..." : "CONNECTING TO SERVER..."}
+                          {wsStatus === 'reconnecting' ? 'RECONNECTING TO SERVER...' : 'CONNECTING TO SERVER...'}
                         </p>
                         <p className="font-bold text-sm md:text-base">Establishing bulletproof connection</p>
                       </div>
                     )}
-
-                    {wsStatus === "connected" && userCount < 2 && (
+                    {wsStatus === 'connected' && userCount < 2 && (
                       <div className="bg-yellow-200 p-4 md:p-6 border-4 border-black">
                         <div className="animate-pulse w-6 md:w-8 h-6 md:h-8 bg-yellow-600 rounded-full mx-auto mb-4"></div>
                         <p className="font-black text-base md:text-lg">WAITING FOR PEER...</p>
@@ -445,45 +437,38 @@ export default function SessionPage() {
                         <p className="text-xs md:text-sm mt-2">Users in session: {userCount}/2</p>
                       </div>
                     )}
-
-                    {(wsStatus === "connected" || wsStatus === "waiting") && userCount === 2 && (connectionStatus === "connecting" || connectionStatus === "reconnecting") && (
-                      <div className="bg-orange-200 p-4 md:p-6 border-4 border-black">
-                        <div className="animate-spin w-6 md:w-8 h-6 md:h-8 border-4 border-black border-t-transparent rounded-full mx-auto mb-4"></div>
-                        <p className="font-black text-base md:text-lg">
-                          {connectionStatus === "reconnecting" ? "REESTABLISHING P2P..." : "ESTABLISHING P2P..."}
-                        </p>
-                        <p className="font-bold text-sm md:text-base">Bulletproof connection setup</p>
-                      </div>
-                    )}
-
-                    {connectionStatus === "connected" && (
+                    {(wsStatus === 'connected' || wsStatus === 'waiting') &&
+                      userCount === 2 &&
+                      (connectionStatus === 'connecting' || connectionStatus === 'reconnecting') && (
+                        <div className="bg-orange-200 p-4 md:p-6 border-4 border-black">
+                          <div className="animate-spin w-6 md:w-8 h-6 md:h-8 border-4 border-black border-t-transparent rounded-full mx-auto mb-4"></div>
+                          <p className="font-black text-base md:text-lg">
+                            {connectionStatus === 'reconnecting' ? 'REESTABLISHING P2P...' : 'ESTABLISHING P2P...'}
+                          </p>
+                          <p className="font-bold text-sm md:text-base">Bulletproof connection setup</p>
+                        </div>
+                      )}
+                    {connectionStatus === 'connected' && (
                       <div className="bg-green-200 p-4 md:p-6 border-4 border-black">
                         <CheckCircle className="w-10 md:w-12 h-10 md:h-12 mx-auto mb-4 text-green-600" />
                         <p className="font-black text-base md:text-lg text-green-800">BULLETPROOF CONNECTION!</p>
                         <p className="font-bold text-sm md:text-base">Maximum stability • Zero packet loss</p>
-                        <p className="text-xs md:text-sm mt-2">
-                          Quality: {connectionQuality}
-                        </p>
+                        <p className="text-xs md:text-sm mt-2">Quality: {connectionQuality}</p>
                       </div>
                     )}
-
-                    {connectionStatus === "waiting" && (
+                    {connectionStatus === 'waiting' && (
                       <div className="bg-blue-200 p-4 md:p-6 border-4 border-black">
                         <div className="animate-pulse w-6 md:w-8 h-6 md:h-8 bg-blue-600 rounded-full mx-auto mb-4"></div>
                         <p className="font-black text-base md:text-lg">WAITING FOR CONNECTION...</p>
                         <p className="font-bold text-sm md:text-base">Preparing bulletproof link</p>
                       </div>
                     )}
-
-                    {(wsStatus === "disconnected" || connectionStatus === "disconnected") && (
+                    {(wsStatus === 'disconnected' || connectionStatus === 'disconnected') && (
                       <div className="bg-red-200 p-4 md:p-6 border-4 border-black">
                         <WifiOff className="w-10 md:w-12 h-10 md:h-12 mx-auto mb-4 text-red-600" />
                         <p className="font-black text-base md:text-lg text-red-800">CONNECTION ISSUE</p>
                         <p className="font-bold mb-4 text-sm md:text-base">Auto-reconnecting...</p>
-                        <Button
-                          onClick={handleReconnect}
-                          className="neubrutalism-button bg-red-500 text-white touch-target"
-                        >
+                        <Button onClick={handleReconnect} className="neubrutalism-button bg-red-500 text-white touch-target">
                           <RefreshCw className="w-4 h-4 mr-2" />
                           FORCE RECONNECT
                         </Button>
@@ -511,7 +496,7 @@ export default function SessionPage() {
                       <div key={transfer.id} className="bg-white p-3 md:p-4 border-2 border-black">
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2 min-w-0 flex-1">
-                            {transfer.direction === "sending" ? (
+                            {transfer.direction === 'sending' ? (
                               <Upload className="w-3 md:w-4 h-3 md:h-4 flex-shrink-0" />
                             ) : (
                               <Download className="w-3 md:w-4 h-3 md:h-4 flex-shrink-0" />
@@ -520,35 +505,35 @@ export default function SessionPage() {
                             <span className="text-xs md:text-sm text-gray-600 flex-shrink-0">
                               ({(transfer.size / 1024 / 1024).toFixed(1)}MB)
                             </span>
-                            {/* {transfer.speed && transfer.speed > 0 && (
-                              <span className="text-xs md:text-sm text-blue-600 flex-shrink-0">
-                                {transfer.speed < 1024
-                                  ? ${transfer.speed.toFixed(0)} B/s
-                                  : transfer.speed < 1024 * 1024
-                                    ? ${(transfer.speed / 1024).toFixed(1)} KB/s
-                                    : ${(transfer.speed / 1024 / 1024).toFixed(1)} MB/s}
-                              </span>
-                            )} */}
                           </div>
                           <span
                             className={`px-2 py-1 text-xs font-bold border-2 border-black flex-shrink-0 ${
-                              transfer.status === "completed"
-                                ? "bg-green-300"
-                                : transfer.status === "transferring"
-                                  ? "bg-yellow-300"
-                                  : transfer.status === "error"
-                                    ? "bg-red-300"
-                                    : transfer.status === "cancelled"
-                                      ? "bg-orange-300"
-                                      : "bg-gray-300"
+                              transfer.status === 'completed'
+                                ? 'bg-green-300'
+                                : transfer.status === 'transferring'
+                                ? 'bg-yellow-300'
+                                : transfer.status === 'error'
+                                ? 'bg-red-300'
+                                : transfer.status === 'cancelled'
+                                ? 'bg-orange-300'
+                                : 'bg-gray-300'
                             }`}
                           >
                             {transfer.status.toUpperCase()}
                           </span>
                         </div>
-
-                        <div className="progress-bar">
-                          <div className="progress-fill" style={{ width: `${transfer.progress}%` }} />
+                        {/* Progress bar */}
+                        <div className="w-full h-2 bg-gray-200 rounded">
+                          <div
+                            className={`h-2 rounded transition-all duration-300 ${
+                              transfer.status === 'completed'
+                                ? 'bg-green-500'
+                                : transfer.status === 'error'
+                                ? 'bg-red-500'
+                                : 'bg-blue-500'
+                            }`}
+                            style={{ width: `${transfer.progress}%` }}
+                          />
                         </div>
                         <div className="text-right text-xs md:text-sm font-bold mt-1">{transfer.progress}%</div>
                       </div>

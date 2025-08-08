@@ -37,6 +37,11 @@ interface FileOfferData {
   fileName: string
   fileSize: number
   fileType: string
+  encryption?: {
+    algo: 'django-fernet'
+    key: string
+    originalName: string
+  }
 }
 
 interface FileAcceptData {
@@ -92,6 +97,15 @@ interface P2PMessage {
 type ConnectionStatus = "waiting" | "connecting" | "connected" | "reconnecting"
 type ConnectionQuality = "excellent" | "good" | "poor"
 
+type Timer = ReturnType<typeof setTimeout>
+type Interval = ReturnType<typeof setInterval>
+
+interface EncryptionInfo {
+  algo: 'django-fernet'
+  key: string
+  originalName: string
+}
+
 export class BulletproofP2P {
   private sessionId: string
   private userId: string
@@ -108,19 +122,18 @@ export class BulletproofP2P {
   private currentSpeed = 0
   private userCount = 0
   private isDestroyed = false
-  private lastSuccessfulConnection = 0
 
   // Timers
-  private connectionRetryTimeout: ReturnType<typeof setTimeout> | null = null
-  private signalingRetryTimeout: ReturnType<typeof setTimeout> | null = null
-  private pingInterval: ReturnType<typeof setInterval> | null = null
-  private visibilityTimer: ReturnType<typeof setTimeout> | null = null
+  private connectionRetryTimeout: Timer | null = null
+  private signalingRetryTimeout: Timer | null = null
+  private pingInterval: Interval | null = null
 
   // File state
   private fileTransfers = new Map<string, FileTransfer>()
   private incomingFiles = new Map<string, IncomingFileData>()
-  private sendingFiles = new Map<string, File>() // fileId -> File
-  private activeTransfers = new Set<string>() // guarded to avoid resets during transfer
+  private sendingFiles = new Map<string, File>() // fileId -> (possibly encrypted) File
+  private activeTransfers = new Set<string>()
+  private incomingEncryption = new Map<string, EncryptionInfo>() // receiver-side encryption info
 
   // Callbacks
   public onConnectionStatusChange?: (status: ConnectionStatus) => void
@@ -181,7 +194,6 @@ export class BulletproofP2P {
     this.sessionId = sessionId
     this.userId = userId
     this.initSignalingServers()
-    this.bindLifecycleHandlers()
     console.log(`🚀 BulletproofP2P for session ${sessionId}`)
   }
 
@@ -192,21 +204,88 @@ export class BulletproofP2P {
     this.startKeepAlive()
   }
 
+  // Encryption endpoints (single-file Django)
+  private getDjangoBaseUrl(): string {
+    // Priority: URL ?django=..., then localStorage('DJANGO_BASE_URL'), else default localhost
+    try {
+      const sp = new URLSearchParams(window.location.search)
+      const q = sp.get('django')
+      if (q) return q
+    } catch {}
+    try {
+      const ls = window.localStorage.getItem('DJANGO_BASE_URL')
+      if (ls) return ls
+    } catch {}
+    return 'http://localhost:8000'
+  }
+
+  private async getDjangoKey(): Promise<string> {
+    const base = this.getDjangoBaseUrl().replace(/\/$/, '')
+    const res = await fetch(`${base}/api/key`, { method: 'GET' })
+    if (!res.ok) throw new Error(`Django /key failed ${res.status}`)
+    const json = await res.json().catch(() => null as any)
+    const key = json?.key
+    if (!key) throw new Error('Invalid key payload')
+    return key
+  }
+
+  private async encryptViaDjango(file: File): Promise<{ blob: Blob; key: string } | null> {
+    try {
+      const base = this.getDjangoBaseUrl().replace(/\/$/, '')
+      const key = await this.getDjangoKey()
+      const fd = new FormData()
+      fd.append('file', file, file.name)
+      fd.append('key', key)
+      const res = await fetch(`${base}/api/encrypt`, { method: 'POST', body: fd })
+      if (!res.ok) throw new Error(`Encrypt failed ${res.status}`)
+      const blob = await res.blob()
+      return { blob, key }
+    } catch (e) {
+      console.warn('⚠️ Encrypt via Django failed, falling back to plain send', e)
+      return null
+    }
+  }
+
+  private async decryptViaDjango(blob: Blob, key: string): Promise<Blob | null> {
+    try {
+      const base = this.getDjangoBaseUrl().replace(/\/$/, '')
+      const fd = new FormData()
+      fd.append('file', blob, 'file.enc')
+      fd.append('key', key)
+      const res = await fetch(`${base}/api/decrypt`, { method: 'POST', body: fd })
+      if (!res.ok) throw new Error(`Decrypt failed ${res.status}`)
+      return await res.blob()
+    } catch (e) {
+      console.error('❌ Decrypt via Django failed', e)
+      return null
+    }
+  }
+
   async sendFiles(files: File[]): Promise<void> {
     if (!this.dc || this.dc.readyState !== 'open') {
       this.onError?.('Not connected - cannot send files')
       return
     }
 
-    for (const file of files) {
+    for (const original of files) {
+      let fileToSend = original
+      let encInfo: EncryptionInfo | undefined
+
+      // Encrypt on server first (if server available). If it fails, send plain.
+      const enc = await this.encryptViaDjango(original)
+      if (enc) {
+        fileToSend = new File([enc.blob], `${original.name}.enc`, { type: 'application/octet-stream' })
+        encInfo = { algo: 'django-fernet', key: enc.key, originalName: original.name }
+      }
+
       const fileId = this.id()
-      this.sendingFiles.set(fileId, file)
+      this.sendingFiles.set(fileId, fileToSend)
 
       const transfer: FileTransfer = {
         id: fileId,
-        name: file.name,
-        size: file.size,
-        type: file.type,
+        name: fileToSend.name,
+        size: fileToSend.size,
+        type: fileToSend.type,
         progress: 0,
         status: "pending",
         direction: "sending",
@@ -217,10 +296,16 @@ export class BulletproofP2P {
       this.fileTransfers.set(fileId, transfer)
       this.updateFileTransfers()
 
-      // Send offer
+      // Send offer (include encryption metadata if used)
       this.sendP2P({
         type: 'file-offer',
-        data: { fileId, fileName: file.name, fileSize: file.size, fileType: file.type },
+        data: {
+          fileId,
+          fileName: fileToSend.name,
+          fileSize: fileToSend.size,
+          fileType: fileToSend.type,
+          encryption: encInfo
+        } as FileOfferData,
         timestamp: Date.now(),
         id: this.id()
       })
@@ -254,7 +339,6 @@ export class BulletproofP2P {
     if (this.pingInterval) clearInterval(this.pingInterval)
     if (this.connectionRetryTimeout) clearTimeout(this.connectionRetryTimeout)
     if (this.signalingRetryTimeout) clearTimeout(this.signalingRetryTimeout)
-    if (this.visibilityTimer) clearTimeout(this.visibilityTimer)
     try { this.dc?.close() } catch {}
     try { this.pc?.close() } catch {}
     try { this.ws?.close(1000, 'Client disconnect') } catch {}
@@ -262,6 +346,7 @@ export class BulletproofP2P {
     this.incomingFiles.clear()
     this.sendingFiles.clear()
     this.activeTransfers.clear()
+    this.incomingEncryption.clear()
   }
 
   // Signaling
@@ -269,7 +354,6 @@ export class BulletproofP2P {
     const host = window.location.hostname
     const local = host === 'localhost' || host === '127.0.0.1'
     this.signalingServers = []
-    if (process.env.NEXT_PUBLIC_WS_URL) this.signalingServers.push(process.env.NEXT_PUBLIC_WS_URL)
     if (local) {
       this.signalingServers.push('ws://localhost:8080', 'ws://127.0.0.1:8080')
     } else {
@@ -410,7 +494,7 @@ export class BulletproofP2P {
     if (this.pc && (this.pc.connectionState === 'connected' || this.pc.connectionState === 'connecting')) return
     this.createPC()
     if (this.isInitiator) {
-      this.dc = this.pc!.createDataChannel('bulletproof-reliable', { ordered: true }) // reliable by default
+      this.dc = this.pc!.createDataChannel('bulletproof-reliable', { ordered: true })
       this.setupDC(this.dc)
       this.negotiate()
     }
@@ -431,11 +515,10 @@ export class BulletproofP2P {
       if (st === 'connected') {
         this.connectionStatus = "connected"
         this.onConnectionStatusChange?.(this.connectionStatus)
-        this.lastSuccessfulConnection = Date.now()
         this.onConnectionRecovery?.()
       } else if (st === 'disconnected' || st === 'failed') {
-        // Do NOT reset while actively transferring; only restart ICE
         try { this.pc?.restartIce() } catch {}
+        // Avoid full reset during active transfers
         if (this.activeTransfers.size === 0) {
           this.setReconnecting()
           if (!this.connectionRetryTimeout) {
@@ -448,7 +531,7 @@ export class BulletproofP2P {
             }, this.ICE_RECOVERY_DELAY)
           }
         } else {
-          this.setReconnecting() // show reconnecting but keep PC for transfer to finish/recover
+          this.setReconnecting()
         }
       } else if (st === 'connecting' || st === 'new') {
         this.setConnecting()
@@ -519,7 +602,6 @@ export class BulletproofP2P {
       this.selectChunkSize()
       this.connectionStatus = "connected"
       this.onConnectionStatusChange?.(this.connectionStatus)
-      this.lastSuccessfulConnection = Date.now()
     }
     channel.onclose = () => this.setReconnecting()
     channel.onerror = (e) => { console.error('❌ DC error', e); this.setReconnecting() }
@@ -571,6 +653,13 @@ export class BulletproofP2P {
 
   // File pipeline
   private handleFileOffer(data: FileOfferData): void {
+    if (data.encryption?.algo === 'django-fernet') {
+      this.incomingEncryption.set(data.fileId, {
+        algo: 'django-fernet',
+        key: data.encryption.key,
+        originalName: data.encryption.originalName
+      })
+    }
     // Auto-accept
     this.sendP2P({
       type: 'file-accept',
@@ -678,15 +767,9 @@ export class BulletproofP2P {
       console.log(`✅ Sent ${file.name} @ ${this.prettySpeed(transfer.speed || 0)}`)
     } catch (e) {
       console.error(`❌ Failed to send ${file.name}`, e)
-      // Do NOT mark as error if DC hiccuped during active transfer; let ICE restart attempt recovery
-      if (this.dc && this.dc.readyState === 'open') {
-        transfer.status = "error"
-        this.onError?.(`Failed to send ${file.name}`)
-      } else {
-        // Leave as transferring while reconnection attempts run; UI remains reconnecting
-        transfer.status = "transferring"
-      }
+      transfer.status = "error"
       this.updateFileTransfers()
+      this.onError?.(`Failed to send ${file.name}`)
     } finally {
       this.activeTransfers.delete(fileId)
       this.sendingFiles.delete(fileId)
@@ -748,7 +831,7 @@ export class BulletproofP2P {
         const speed = elapsed > 0 ? Math.round(inc.bytesReceived / elapsed) : 0
         t.bytesTransferred = inc.bytesReceived
         t.speed = speed
-        t.progress = Math.min(99, Math.floor((inc.bytesReceived / inc.fileSize) * 100)) // cap at 99 until complete arrives
+        t.progress = Math.min(99, Math.floor((inc.bytesReceived / inc.fileSize) * 100))
         t.eta = speed > 0 ? Math.round((inc.fileSize - inc.bytesReceived) / speed) : 0
         this.updateFileTransfers()
       }
@@ -757,7 +840,7 @@ export class BulletproofP2P {
     }
   }
 
-  private onFileComplete(data: FileCompleteData): void {
+  private async onFileComplete(data: FileCompleteData): Promise<void> {
     const inc = this.incomingFiles.get(data.fileId)
     const t = this.fileTransfers.get(data.fileId)
 
@@ -773,14 +856,14 @@ export class BulletproofP2P {
 
     // Assemble when bytes match fileSize (or after short wait)
     if (inc.bytesReceived >= inc.fileSize) {
-      this.assemble(data.fileId)
+      await this.assemble(data.fileId)
     } else {
-      setTimeout(() => {
+      setTimeout(async () => {
         const again = this.incomingFiles.get(data.fileId)
         const tr = this.fileTransfers.get(data.fileId)
         if (!again || !tr) return
         if (again.bytesReceived >= again.fileSize) {
-          this.assemble(data.fileId)
+          await this.assemble(data.fileId)
         } else {
           console.error(`❌ File incomplete: ${again.bytesReceived}/${again.fileSize}`)
           tr.status = 'error'
@@ -791,7 +874,7 @@ export class BulletproofP2P {
     }
   }
 
-  private assemble(fileId: string): void {
+  private async assemble(fileId: string): Promise<void> {
     const inc = this.incomingFiles.get(fileId)
     const t = this.fileTransfers.get(fileId)
     if (!inc || !t) return
@@ -806,11 +889,26 @@ export class BulletproofP2P {
         total += ab.byteLength
       }
 
-      const blob = new Blob(parts, { type: inc.fileType || 'application/octet-stream' })
+      let blob = new Blob(parts, { type: inc.fileType || 'application/octet-stream' })
+      let downloadName = inc.fileName
+
+      // Auto-decrypt via Django if needed
+      const enc = this.incomingEncryption.get(fileId)
+      if (enc) {
+        const dec = await this.decryptViaDjango(blob, enc.key)
+        if (dec) {
+          blob = dec
+          downloadName = enc.originalName
+        } else {
+          // decryption failed, keep encrypted content fallback
+          this.onError?.('Decryption failed - sending encrypted file instead')
+        }
+      }
+
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = inc.fileName
+      a.download = downloadName
       a.style.display = 'none'
       document.body.appendChild(a)
       a.click()
@@ -823,13 +921,14 @@ export class BulletproofP2P {
       this.updateFileTransfers()
       this.incomingFiles.delete(fileId)
       this.activeTransfers.delete(fileId)
+      this.incomingEncryption.delete(fileId)
 
       // Ack completion back
       this.sendP2P({ type: 'file-complete', data: { fileId }, timestamp: Date.now(), id: this.id() })
 
       const elapsed = (t.endTime! - (t.startTime || t.endTime!)) / 1000
       const avg = elapsed > 0 ? Math.round(total / elapsed) : 0
-      console.log(`✅ Downloaded ${inc.fileName} @ ${this.prettySpeed(avg)}`)
+      console.log(`✅ Downloaded ${downloadName} @ ${this.prettySpeed(avg)}`)
     } catch (e) {
       console.error('❌ assemble', e)
       t.status = 'error'
@@ -868,6 +967,7 @@ export class BulletproofP2P {
     if (!this.dc) return Promise.resolve()
     return new Promise((resolve) => {
       const h = () => { this.dc?.removeEventListener('bufferedamountlow', h); resolve() }
+      // Add null check before addEventListener
       if (this.dc) {
         this.dc.addEventListener('bufferedamountlow', h, { once: true })
       } else {
@@ -939,9 +1039,8 @@ export class BulletproofP2P {
       this.onConnectionStatusChange?.(this.connectionStatus)
     }
   }
-  private resetPeer(reason: string): void {
+  private resetPeer(_reason: string): void {
     if (this.activeTransfers.size > 0) {
-      // Avoid full reset during active transfers; rely on ICE restart
       try { this.pc?.restartIce() } catch {}
       return
     }
@@ -949,35 +1048,6 @@ export class BulletproofP2P {
     try { this.pc?.close() } catch {}
     this.dc = null
     this.pc = null
-  }
-
-  private bindLifecycleHandlers(): void {
-    window.addEventListener('online', () => {
-      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) this.connectToSignaling()
-      if (this.userCount >= 2) {
-        if (this.pc && this.pc.connectionState !== 'connected') {
-          try { this.pc.restartIce() } catch {}
-          this.ensurePeer()
-        }
-      }
-    })
-    window.addEventListener('offline', () => this.setReconnecting())
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') {
-        if (this.visibilityTimer) clearTimeout(this.visibilityTimer)
-        this.visibilityTimer = setTimeout(() => {
-          if (!this.isDestroyed) {
-            if (!this.ws || this.ws.readyState !== WebSocket.OPEN) this.connectToSignaling()
-            if (this.userCount >= 2) {
-              if (this.pc && this.pc.connectionState !== 'connected') {
-                try { this.pc.restartIce() } catch {}
-                this.ensurePeer()
-              }
-            }
-          }
-        }, 300)
-      }
-    })
   }
 
   private sleep(ms: number) { return new Promise(r => setTimeout(r, ms)) }
@@ -991,15 +1061,14 @@ export class BulletproofP2P {
     return 'Unknown'
   }
 
+  private prettySpeed(bps: number): string {
+    if (bps > 1024 * 1024) return `${(bps / (1024 * 1024)).toFixed(2)} MB/s`
+    if (bps > 1024) return `${(bps / 1024).toFixed(2)} KB/s`
+    return `${bps} B/s`
+  }
+
   private updateFileTransfers(): void {
     const transfers = Array.from(this.fileTransfers.values())
     this.onFileTransferUpdate?.(transfers)
-  }
-
-  private prettySpeed(bytesPerSecond: number): string {
-    if (bytesPerSecond < 1024) return `${bytesPerSecond} B/s`
-    if (bytesPerSecond < 1024 * 1024) return `${(bytesPerSecond / 1024).toFixed(1)} KB/s`
-    if (bytesPerSecond < 1024 * 1024 * 1024) return `${(bytesPerSecond / (1024 * 1024)).toFixed(1)} MB/s`
-    return `${(bytesPerSecond / (1024 * 1024 * 1024)).toFixed(1)} GB/s`
   }
 }
