@@ -18,7 +18,7 @@ interface FileTransfer {
   size: number
   type: string
   progress: number
-  status: "pending" | "transferring" | "completed" | "error"
+  status: "pending" | "transferring" | "completed" | "error" | "cancelled"
   direction: "sending" | "receiving"
   speed?: number
 }
@@ -37,9 +37,9 @@ export default function SessionPage() {
   const router = useRouter()
   const sessionId = params.id as string
 
-  // Simple connection states
-  const [connectionStatus, setConnectionStatus] = useState<"connecting" | "connected" | "disconnected">("connecting")
-  const [wsStatus, setWsStatus] = useState<"connecting" | "connected" | "disconnected">("connecting")
+  // Simple connection states - updated to include "reconnecting"
+  const [connectionStatus, setConnectionStatus] = useState<"connecting" | "connected" | "disconnected" | "waiting" | "reconnecting">("connecting")
+  const [wsStatus, setWsStatus] = useState<"connecting" | "connected" | "disconnected" | "waiting" | "reconnecting">("connecting")
   const [fileTransfers, setFileTransfers] = useState<FileTransfer[]>([])
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [error, setError] = useState("")
@@ -259,7 +259,7 @@ export default function SessionPage() {
           <div className="flex items-center justify-center gap-2 md:gap-4 flex-wrap">
             <div
               className={`flex items-center gap-1 md:gap-2 px-2 md:px-4 py-1 md:py-2 border-2 md:border-4 border-black font-black text-xs md:text-sm ${
-                wsStatus === "connected" ? "bg-green-400" : wsStatus === "connecting" ? "bg-yellow-400" : "bg-red-400"
+                wsStatus === "connected" ? "bg-green-400" : wsStatus === "connecting" || wsStatus === "reconnecting" ? "bg-yellow-400" : "bg-red-400"
               }`}
             >
               {wsStatus === "connected" ? (
@@ -276,7 +276,7 @@ export default function SessionPage() {
               className={`flex items-center gap-1 md:gap-2 px-2 md:px-4 py-1 md:py-2 border-2 md:border-4 border-black font-black text-xs md:text-sm ${
                 connectionStatus === "connected"
                   ? "bg-green-400"
-                  : connectionStatus === "connecting"
+                  : connectionStatus === "connecting" || connectionStatus === "reconnecting"
                     ? "bg-yellow-400"
                     : "bg-red-400"
               }`}
@@ -427,10 +427,12 @@ export default function SessionPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-center space-y-4">
-                    {wsStatus === "connecting" && (
+                    {(wsStatus === "connecting" || wsStatus === "reconnecting") && (
                       <div className="bg-yellow-200 p-4 md:p-6 border-4 border-black">
                         <div className="animate-spin w-6 md:w-8 h-6 md:h-8 border-4 border-black border-t-transparent rounded-full mx-auto mb-4"></div>
-                        <p className="font-black text-base md:text-lg">CONNECTING TO SERVER...</p>
+                        <p className="font-black text-base md:text-lg">
+                          {wsStatus === "reconnecting" ? "RECONNECTING TO SERVER..." : "CONNECTING TO SERVER..."}
+                        </p>
                         <p className="font-bold text-sm md:text-base">Establishing bulletproof connection</p>
                       </div>
                     )}
@@ -444,10 +446,12 @@ export default function SessionPage() {
                       </div>
                     )}
 
-                    {wsStatus === "connected" && userCount === 2 && connectionStatus === "connecting" && (
+                    {(wsStatus === "connected" || wsStatus === "waiting") && userCount === 2 && (connectionStatus === "connecting" || connectionStatus === "reconnecting") && (
                       <div className="bg-orange-200 p-4 md:p-6 border-4 border-black">
                         <div className="animate-spin w-6 md:w-8 h-6 md:h-8 border-4 border-black border-t-transparent rounded-full mx-auto mb-4"></div>
-                        <p className="font-black text-base md:text-lg">ESTABLISHING P2P...</p>
+                        <p className="font-black text-base md:text-lg">
+                          {connectionStatus === "reconnecting" ? "REESTABLISHING P2P..." : "ESTABLISHING P2P..."}
+                        </p>
                         <p className="font-bold text-sm md:text-base">Bulletproof connection setup</p>
                       </div>
                     )}
@@ -460,6 +464,14 @@ export default function SessionPage() {
                         <p className="text-xs md:text-sm mt-2">
                           Quality: {connectionQuality}
                         </p>
+                      </div>
+                    )}
+
+                    {connectionStatus === "waiting" && (
+                      <div className="bg-blue-200 p-4 md:p-6 border-4 border-black">
+                        <div className="animate-pulse w-6 md:w-8 h-6 md:h-8 bg-blue-600 rounded-full mx-auto mb-4"></div>
+                        <p className="font-black text-base md:text-lg">WAITING FOR CONNECTION...</p>
+                        <p className="font-bold text-sm md:text-base">Preparing bulletproof link</p>
                       </div>
                     )}
 
@@ -526,7 +538,9 @@ export default function SessionPage() {
                                   ? "bg-yellow-300"
                                   : transfer.status === "error"
                                     ? "bg-red-300"
-                                    : "bg-gray-300"
+                                    : transfer.status === "cancelled"
+                                      ? "bg-orange-300"
+                                      : "bg-gray-300"
                             }`}
                           >
                             {transfer.status.toUpperCase()}
