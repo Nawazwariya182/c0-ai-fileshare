@@ -62,8 +62,8 @@ const fileInputRef = useRef<HTMLInputElement>(null)
 const p2pRef = useRef<BulletproofP2P | null>(null)
 
 useEffect(() => {
-  if (!user || !sessionId) return
-  const p2p = new BulletproofP2P(sessionId, (user as any).id || 'anonymous')
+  if (!sessionId) return
+  const p2p = new BulletproofP2P(sessionId, ((user as any)?.id) || 'anonymous')
   p2pRef.current = p2p
 
   p2p.onConnectionStatusChange = (status) => {
@@ -193,8 +193,8 @@ const handleReconnect = () => {
   if (!p2pRef.current) return
   p2pRef.current.destroy()
   setTimeout(() => {
-    if (user && sessionId) {
-      const p2p = new BulletproofP2P(sessionId, (user as any).id || 'anonymous')
+    if (sessionId) {
+      const p2p = new BulletproofP2P(sessionId, ((user as any)?.id) || 'anonymous')
       p2pRef.current = p2p
       p2p.onConnectionStatusChange = (status) => setConnectionStatus(status as any)
       p2p.onSignalingStatusChange = (status) => setWsStatus(status as any)
@@ -207,11 +207,6 @@ const handleReconnect = () => {
       p2p.initialize()
     }
   }, 1000)
-}
-
-if (!user) {
-  router.push('/')
-  return null
 }
 
 const getConnectionQualityColor = () => {
