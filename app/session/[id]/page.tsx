@@ -64,8 +64,9 @@ export default function SessionPage() {
   useEffect(() => {
     if (!user || !sessionId) return
 
-    console.log('🚀 Initializing P2P for session:', sessionId)
+    console.log('🚀 Initializing P2P for session:', sessionId, 'user:', (user as any).id)
     setIsInitializing(true)
+    setUserCount(1) // Start with 1 (ourselves)
 
     const p2p = new BulletproofP2P(sessionId, (user as any).id || 'anonymous')
     p2pRef.current = p2p
@@ -88,8 +89,8 @@ export default function SessionPage() {
       console.log('📡 Signaling status changed:', status)
       setWsStatus(
         status === 'connected' || status === 'reconnecting' || status === 'connecting' || status === 'waiting'
-          ? status 
-          : 'waiting'
+        ? status 
+        : 'waiting'
       )
       if (status === 'connected') {
         setError('')
@@ -98,9 +99,10 @@ export default function SessionPage() {
 
     p2p.onUserCountChange = (count) => {
       console.log('👥 User count changed:', count)
-      setUserCount(count)
+      setUserCount(Math.max(1, count)) // Ensure minimum of 1
       if (count >= 2) {
         setIsInitializing(false)
+        console.log('✅ Both peers present, ready for connection')
       }
     }
 
@@ -348,12 +350,13 @@ export default function SessionPage() {
   }
 
   const getConnectionStatusDisplay = () => {
-    if (isInitializing) {
+    if (isInitializing && userCount < 2) {
       return (
         <div className="bg-blue-200 p-4 md:p-6 border-4 border-black">
           <div className="animate-spin w-6 md:w-8 h-6 md:h-8 border-4 border-black border-t-transparent rounded-full mx-auto mb-4"></div>
           <p className="font-black text-base md:text-lg">INITIALIZING...</p>
           <p className="font-bold text-sm md:text-base">Setting up bulletproof connection</p>
+          <p className="text-xs md:text-sm mt-2">Users: {userCount}/2</p>
         </div>
       )
     }
@@ -366,6 +369,7 @@ export default function SessionPage() {
             {wsStatus === 'reconnecting' ? 'RECONNECTING TO SERVER...' : 'CONNECTING TO SERVER...'}
           </p>
           <p className="font-bold text-sm md:text-base">Establishing bulletproof connection</p>
+          <p className="text-xs md:text-sm mt-2">Users: {userCount}/2</p>
         </div>
       )
     }
@@ -377,11 +381,14 @@ export default function SessionPage() {
           <p className="font-black text-base md:text-lg">WAITING FOR PEER...</p>
           <p className="font-bold text-sm md:text-base">Share the session code with your friend!</p>
           <p className="text-xs md:text-sm mt-2">Users in session: {userCount}/2</p>
+          <div className="mt-4 p-2 bg-white border-2 border-black">
+            <p className="text-xs font-bold">Session Code: {sessionId}</p>
+          </div>
         </div>
       )
     }
 
-    if (wsStatus === 'connected' && userCount === 2 && (connectionStatus === 'connecting' || connectionStatus === 'reconnecting')) {
+    if (wsStatus === 'connected' && userCount >= 2 && (connectionStatus === 'connecting' || connectionStatus === 'reconnecting')) {
       return (
         <div className="bg-orange-200 p-4 md:p-6 border-4 border-black">
           <div className="animate-spin w-6 md:w-8 h-6 md:h-8 border-4 border-black border-t-transparent rounded-full mx-auto mb-4"></div>
@@ -389,6 +396,7 @@ export default function SessionPage() {
             {connectionStatus === 'reconnecting' ? 'REESTABLISHING P2P...' : 'ESTABLISHING P2P...'}
           </p>
           <p className="font-bold text-sm md:text-base">Bulletproof connection setup</p>
+          <p className="text-xs md:text-sm mt-2">Users: {userCount}/2</p>
         </div>
       )
     }
@@ -399,7 +407,9 @@ export default function SessionPage() {
           <CheckCircle className="w-10 md:w-12 h-10 md:h-12 mx-auto mb-4 text-green-600" />
           <p className="font-black text-base md:text-lg text-green-800">BULLETPROOF CONNECTION!</p>
           <p className="font-bold text-sm md:text-base">Maximum stability • Zero packet loss</p>
-          <p className="text-xs md:text-sm mt-2">Quality: {connectionQuality} • Speed: {getSpeedDisplay()}</p>
+          <p className="text-xs md:text-sm mt-2">
+            Quality: {connectionQuality} • Speed: {getSpeedDisplay()} • Users: {userCount}/2
+          </p>
         </div>
       )
     }
@@ -409,6 +419,7 @@ export default function SessionPage() {
         <WifiOff className="w-10 md:w-12 h-10 md:h-12 mx-auto mb-4 text-red-600" />
         <p className="font-black text-base md:text-lg text-red-800">CONNECTION ISSUE</p>
         <p className="font-bold mb-4 text-sm md:text-base">Auto-reconnecting...</p>
+        <p className="text-xs md:text-sm mb-4">Users: {userCount}/2</p>
         <Button onClick={handleReconnect} className="neubrutalism-button bg-red-500 text-white touch-target">
           <RefreshCw className="w-4 h-4 mr-2" />
           FORCE RECONNECT

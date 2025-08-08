@@ -13,6 +13,8 @@ interface SignalingMessage {
   candidate?: RTCIceCandidateInit
   temporary?: boolean
   error?: string
+  requestUserCount?: boolean
+  heartbeat?: boolean
 }
 
 interface ClientInfo {
@@ -218,6 +220,10 @@ export class BulletproofP2P {
     console.log('🔄 Initializing P2P connection...')
     this.isDestroyed = false
     this.backoffAttempts = 0
+    this.userCount = 1 // Start with 1 (ourselves)
+    this.updateConnectionStatus("waiting")
+    this.updateSignalingStatus("connecting")
+    
     await this.connectToSignaling()
     this.startHeartbeat()
   }
@@ -503,35 +509,51 @@ export class BulletproofP2P {
       case 'joined':
         console.log('🚪 Joined session:', message)
         this.isInitiator = message.isInitiator ?? false
-        this.userCount = message.userCount ?? 1
+        // Fix: Ensure we get the correct user count
+        this.userCount = Math.max(1, message.userCount ?? 1)
         this.onUserCountChange?.(this.userCount)
         
         console.log(`👥 User count: ${this.userCount}, Initiator: ${this.isInitiator}`)
         
+        // Start connection attempt immediately if we have 2 users
         if (this.userCount >= 2) {
           console.log('🤝 Ready for P2P connection')
           this.updateConnectionStatus("connecting")
-          await this.initiatePeerConnection()
+          // Add small delay to ensure both peers are ready
+          setTimeout(() => this.initiatePeerConnection(), 500)
+        } else {
+          this.updateConnectionStatus("waiting")
         }
         break
         
       case 'user-joined':
         console.log('👋 User joined:', message)
-        this.userCount = message.userCount ?? this.userCount + 1
+        // Fix: Properly increment user count
+        const newCount = message.userCount ?? (this.userCount + 1)
+        this.userCount = Math.max(this.userCount, newCount)
         this.onUserCountChange?.(this.userCount)
+        
+        console.log(`👥 Updated user count: ${this.userCount}`)
         
         if (this.userCount >= 2) {
           console.log('🤝 Peer available, initiating connection')
           this.updateConnectionStatus("connecting")
-          await this.initiatePeerConnection()
+          // Add small delay to ensure both peers are ready
+          setTimeout(() => this.initiatePeerConnection(), 500)
         }
         break
         
       case 'user-left':
         console.log('👋 User left:', message)
-        this.userCount = message.userCount ?? Math.max(1, this.userCount - 1)
+        // Fix: Properly decrement user count
+        this.userCount = Math.max(1, message.userCount ?? Math.max(1, this.userCount - 1))
         this.onUserCountChange?.(this.userCount)
-        this.resetPeerConnection('User left')
+        console.log(`👥 User count after leave: ${this.userCount}`)
+        
+        if (this.userCount < 2) {
+          this.updateConnectionStatus("waiting")
+          this.resetPeerConnection('User left')
+        }
         break
         
       case 'offer':
@@ -555,7 +577,7 @@ export class BulletproofP2P {
         break
         
       default:
-        console.log('❓ Unknown signaling message:', message.type)
+        console.log('❓ Unknown signaling message:', message.type, message)
     }
   }
 
@@ -584,6 +606,13 @@ export class BulletproofP2P {
 
   // WebRTC Peer Connection
   private async initiatePeerConnection(): Promise<void> {
+    // Don't initiate if we don't have enough users
+    if (this.userCount < 2) {
+      console.log('⚠️ Not enough users for P2P connection:', this.userCount)
+      this.updateConnectionStatus("waiting")
+      return
+    }
+    
     if (this.pc && this.pc.connectionState === 'connected') {
       console.log('✅ Peer connection already established')
       return
@@ -599,7 +628,11 @@ export class BulletproofP2P {
         maxRetransmits: 3
       })
       this.setupDataChannel(this.dc)
-      await this.createAndSendOffer()
+      
+      // Add delay before creating offer to ensure peer is ready
+      setTimeout(() => {
+        this.createAndSendOffer()
+      }, 1000)
     }
   }
 
@@ -1308,12 +1341,13 @@ export class BulletproofP2P {
     this.heartbeatInterval = setInterval(() => {
       if (this.isDestroyed) return
       
-      // Send WebSocket heartbeat
+      // Send WebSocket heartbeat with user count request
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
         this.sendSignalingMessage({
-          type: 'keep-alive',
+          type: 'heartbeat',
           sessionId: this.sessionId,
-          userId: this.userId
+          userId: this.userId,
+          requestUserCount: true
         })
       }
       
