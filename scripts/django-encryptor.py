@@ -76,6 +76,36 @@ def api_key(request: HttpRequest) -> HttpResponse:
         response = JsonResponse({"error": "Failed to generate key"}, status=500)
         return add_cors_headers(response)
 
+@require_http_methods(["GET"])
+def health_check(request: HttpRequest) -> HttpResponse:
+    """Health check endpoint"""
+    try:
+        # Test that cryptography library works
+        test_key = Fernet.generate_key()
+        test_fernet = Fernet(test_key)
+        test_data = b"health check"
+        encrypted = test_fernet.encrypt(test_data)
+        decrypted = test_fernet.decrypt(encrypted)
+        
+        if decrypted != test_data:
+            raise Exception("Encryption/decryption test failed")
+        
+        response = JsonResponse({
+            "status": "healthy",
+            "service": "bulletproof-p2p-encryption-server",
+            "version": "1.0.0",
+            "encryption": "working",
+            "timestamp": int(time.time()) if 'time' in globals() else None
+        })
+        return add_cors_headers(response)
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        response = JsonResponse({
+            "status": "unhealthy",
+            "error": str(e)
+        }, status=500)
+        return add_cors_headers(response)
+
 @csrf_exempt
 @require_http_methods(["POST", "OPTIONS"])
 def api_encrypt(request: HttpRequest) -> HttpResponse:
@@ -89,10 +119,12 @@ def api_encrypt(request: HttpRequest) -> HttpResponse:
         key_str = request.POST.get("key")
         
         if not uploaded_file:
+            logger.warning("No file provided in encrypt request")
             response = JsonResponse({"error": "No file provided"}, status=400)
             return add_cors_headers(response)
         
         if not key_str:
+            logger.warning("No encryption key provided in encrypt request")
             response = JsonResponse({"error": "No encryption key provided"}, status=400)
             return add_cors_headers(response)
         
@@ -100,15 +132,27 @@ def api_encrypt(request: HttpRequest) -> HttpResponse:
         try:
             fernet = Fernet(key_str.encode("utf-8"))
         except Exception as e:
-            logger.error(f"Invalid encryption key: {e}")
+            logger.error(f"Invalid encryption key format: {e}")
             response = JsonResponse({"error": "Invalid encryption key format"}, status=400)
+            return add_cors_headers(response)
+        
+        # Check file size
+        max_size = 100 * 1024 * 1024  # 100MB
+        if uploaded_file.size > max_size:
+            logger.warning(f"File too large: {uploaded_file.size} bytes (max: {max_size})")
+            response = JsonResponse({"error": f"File too large (max: {max_size // (1024*1024)}MB)"}, status=400)
             return add_cors_headers(response)
         
         # Read and encrypt file data
         file_data = uploaded_file.read()
         logger.info(f"Encrypting file: {uploaded_file.name} ({len(file_data)} bytes)")
         
-        encrypted_data = fernet.encrypt(file_data)
+        try:
+            encrypted_data = fernet.encrypt(file_data)
+        except Exception as e:
+            logger.error(f"Encryption failed for {uploaded_file.name}: {e}")
+            response = JsonResponse({"error": f"Encryption failed: {str(e)}"}, status=500)
+            return add_cors_headers(response)
         
         # Return encrypted data as binary response
         response = HttpResponse(
@@ -116,8 +160,9 @@ def api_encrypt(request: HttpRequest) -> HttpResponse:
             content_type="application/octet-stream"
         )
         response["Content-Disposition"] = f'attachment; filename="{uploaded_file.name}.enc"'
+        response["Content-Length"] = str(len(encrypted_data))
         
-        logger.info(f"Successfully encrypted file: {uploaded_file.name}")
+        logger.info(f"Successfully encrypted file: {uploaded_file.name} -> {len(encrypted_data)} bytes")
         return add_cors_headers(response)
         
     except Exception as e:
@@ -138,10 +183,12 @@ def api_decrypt(request: HttpRequest) -> HttpResponse:
         key_str = request.POST.get("key")
         
         if not uploaded_file:
+            logger.warning("No file provided in decrypt request")
             response = JsonResponse({"error": "No file provided"}, status=400)
             return add_cors_headers(response)
         
         if not key_str:
+            logger.warning("No decryption key provided in decrypt request")
             response = JsonResponse({"error": "No decryption key provided"}, status=400)
             return add_cors_headers(response)
         
@@ -149,8 +196,15 @@ def api_decrypt(request: HttpRequest) -> HttpResponse:
         try:
             fernet = Fernet(key_str.encode("utf-8"))
         except Exception as e:
-            logger.error(f"Invalid decryption key: {e}")
+            logger.error(f"Invalid decryption key format: {e}")
             response = JsonResponse({"error": "Invalid decryption key format"}, status=400)
+            return add_cors_headers(response)
+        
+        # Check file size
+        max_size = 100 * 1024 * 1024  # 100MB
+        if uploaded_file.size > max_size:
+            logger.warning(f"File too large: {uploaded_file.size} bytes (max: {max_size})")
+            response = JsonResponse({"error": f"File too large (max: {max_size // (1024*1024)}MB)"}, status=400)
             return add_cors_headers(response)
         
         # Read and decrypt file data
@@ -160,7 +214,7 @@ def api_decrypt(request: HttpRequest) -> HttpResponse:
         try:
             decrypted_data = fernet.decrypt(encrypted_data)
         except Exception as e:
-            logger.error(f"Decryption failed: {e}")
+            logger.error(f"Decryption failed for {uploaded_file.name}: {e}")
             response = JsonResponse({"error": "Decryption failed - invalid key or corrupted data"}, status=400)
             return add_cors_headers(response)
         
@@ -176,35 +230,15 @@ def api_decrypt(request: HttpRequest) -> HttpResponse:
             original_name = original_name[:-4]  # Remove .enc extension
         
         response["Content-Disposition"] = f'attachment; filename="{original_name}"'
+        response["Content-Length"] = str(len(decrypted_data))
         
-        logger.info(f"Successfully decrypted file: {uploaded_file.name}")
+        logger.info(f"Successfully decrypted file: {uploaded_file.name} -> {len(decrypted_data)} bytes")
         return add_cors_headers(response)
         
     except Exception as e:
         logger.error(f"Decryption failed: {e}")
         response = JsonResponse({"error": f"Decryption failed: {str(e)}"}, status=500)
         return add_cors_headers(response)
-
-@require_http_methods(["GET"])
-def health_check(request: HttpRequest) -> HttpResponse:
-    """Health check endpoint"""
-    response = JsonResponse({
-        "status": "healthy",
-        "service": "bulletproof-p2p-encryption-server",
-        "version": "1.0.0"
-    })
-    return add_cors_headers(response)
-
-@require_http_methods(["GET"])
-def api_status(request: HttpRequest) -> HttpResponse:
-    """API status endpoint"""
-    response = JsonResponse({
-        "encryption": "available",
-        "decryption": "available",
-        "key_generation": "available",
-        "max_file_size": "100MB"
-    })
-    return add_cors_headers(response)
 
 # URL patterns
 urlpatterns = [
@@ -225,6 +259,8 @@ urlpatterns = [
 ]
 
 if __name__ == "__main__":
+    import time
+    
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", __name__)
     
     # Default to runserver if no command provided
@@ -232,6 +268,11 @@ if __name__ == "__main__":
         port = os.environ.get("PORT", "8000")
         host = os.environ.get("HOST", "0.0.0.0")
         sys.argv.extend(["runserver", f"{host}:{port}"])
-        logger.info(f"Starting Django encryption server on {host}:{port}")
+        logger.info(f"🔐 Starting Django encryption server on {host}:{port}")
+        logger.info("🔐 Available endpoints:")
+        logger.info(f"   GET  {host}:{port}/health/          - Health check")
+        logger.info(f"   GET  {host}:{port}/api/key          - Generate encryption key")
+        logger.info(f"   POST {host}:{port}/api/encrypt      - Encrypt file")
+        logger.info(f"   POST {host}:{port}/api/decrypt      - Decrypt file")
     
     execute_from_command_line(sys.argv)
