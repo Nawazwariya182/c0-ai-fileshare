@@ -84,7 +84,7 @@ export default function CreateSessionPage() {
             </CardContent>
           </Card>
 
-          {/* QR Code Card */}
+          {/* QR Code Card
           <Card className="neubrutalism-card bg-purple-300">
             <CardHeader>
               <CardTitle className="text-2xl font-black">QR CODE</CardTitle>
@@ -95,7 +95,7 @@ export default function CreateSessionPage() {
               </div>
               <p className="font-bold text-sm">Scan with phone camera to join instantly!</p>
             </CardContent>
-          </Card>
+          </Card> */}
         </div>
 
         {/* Start Session Button */}
@@ -111,7 +111,7 @@ export default function CreateSessionPage() {
           <CardContent className="p-6">
             <h3 className="text-xl font-black mb-4">INSTRUCTIONS:</h3>
             <ol className="list-decimal list-inside space-y-2 font-bold">
-              <li>Share the 6-digit code OR QR code with your friend</li>
+              <li>Share the 6-digit code with your friend</li>
               <li>Click "START SESSION" to enter the sharing room</li>
               <li>Wait for your friend to join using the code</li>
               <li>Once connected, drag & drop files to share instantly!</li>

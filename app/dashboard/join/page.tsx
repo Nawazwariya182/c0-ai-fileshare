@@ -81,7 +81,7 @@ export default function JoinSessionPage() {
           </CardContent>
         </Card>
 
-        {/* QR Scanner Option */}
+        {/* QR Scanner Option
         <Card className="neubrutalism-card bg-purple-300 mt-8">
           <CardHeader>
             <CardTitle className="text-2xl font-black flex items-center gap-2">
@@ -98,7 +98,7 @@ export default function JoinSessionPage() {
               <p className="font-bold text-sm md:text-base">Point camera at QR code</p>
             </div>
           </CardContent>
-        </Card>
+        </Card> */}
 
         {/* Instructions */}
         <Card className="neubrutalism-card bg-green-200 mt-8">

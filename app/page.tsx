@@ -72,7 +72,7 @@ export default function HomePage() {
                   </div>
                   <div className="bg-white p-3 md:p-4 border-2 border-black">
                     <h4 className="font-black text-base md:text-lg">2. SHARE</h4>
-                    <p className="font-bold text-sm md:text-base">Send code or QR to friend</p>
+                    <p className="font-bold text-sm md:text-base">Send code to friend</p>
                   </div>
                   <div className="bg-white p-3 md:p-4 border-2 border-black">
                     <h4 className="font-black text-base md:text-lg">3. TRANSFER</h4>
@@ -86,7 +86,7 @@ export default function HomePage() {
       </div>
       
       <SignedIn>
-        <div className="fixed bottom-4 right-4 p-2 bg-white border-4 border-black rounded-full shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] transition-all">
+        <div className="fixed bottom-4 right-4 p-1 bg-white border-4 border-black rounded-full shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] transition-all">
           <UserButton
         appearance={{
           elements: {

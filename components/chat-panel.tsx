@@ -115,7 +115,7 @@ export function ChatPanel({ isConnected, currentUser, onSendMessage, messages }:
       
       <CardContent className="flex-1 flex flex-col space-y-4">
         {/* Messages */}
-        <div className="flex-1 border-2 border-black bg-white p-2 overflow-y-auto mobile-scroll max-h-[300px]">
+        <div className="flex-1 border-2 border-black bg-white p-2 overflow-y-auto mobile-scroll max-h-[450px]">
           {messages.length === 0 ? (
             <div className="text-center text-gray-500 py-8">
               <MessageCircle className="w-8 h-8 mx-auto mb-2" />
