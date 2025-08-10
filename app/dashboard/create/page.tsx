@@ -40,13 +40,13 @@ export default function CreateSessionPage() {
 
   return (
     <div className="min-h-screen bg-green-300 p-4">
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-6xl mx-auto">
         <header className="text-center mb-6 md:mb-8">
           <h1 className="text-3xl md:text-5xl font-black text-black mb-2 transform -rotate-1">CREATE SESSION</h1>
-          <p className="text-base md:text-lg font-bold px-2">Share this code or QR with your friend!</p>
+          <p className="text-base md:text-lg font-bold px-2">Share this code with your friend!</p>
         </header>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8">
+        <div className="grid grid-cols-1 gap-6 md:gap-8">
           {/* Session Code Card */}
           <Card className="neubrutalism-card bg-yellow-300">
             <CardHeader>
