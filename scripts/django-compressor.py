@@ -37,8 +37,8 @@ if not settings.configured:
     DEFAULT_CHARSET="utf-8",
     STATIC_URL="/static/",
     USE_TZ=True,
-    FILE_UPLOAD_MAX_MEMORY_SIZE=100 * 1024 * 1024,
-    DATA_UPLOAD_MAX_MEMORY_SIZE=100 * 1024 * 1024,
+    FILE_UPLOAD_MAX_MEMORY_SIZE=200 * 1024 * 1024,
+    DATA_UPLOAD_MAX_MEMORY_SIZE=200 * 1024 * 1024,
   )
 
 from django.core.management import execute_from_command_line
@@ -111,9 +111,9 @@ def api_compress(request: HttpRequest) -> HttpResponse:
     if algorithm not in ["gzip", "bzip2", "lzma"]:
       return add_cors_headers(JsonResponse({"error": "Invalid algorithm. Use: gzip, bzip2, lzma"}, status=400))
 
-    max_size = 100 * 1024 * 1024
+    max_size = 200 * 1024 * 1024
     if uploaded.size > max_size:
-      return add_cors_headers(JsonResponse({"error": "File too large (max: 100MB)"}, status=400))
+      return add_cors_headers(JsonResponse({"error": "File too large (max: 200MB)"}, status=400))
 
     data = uploaded.read()
     original_size = len(data)
@@ -121,13 +121,16 @@ def api_compress(request: HttpRequest) -> HttpResponse:
     
     try:
       if algorithm == "gzip":
-        compressed = gzip.compress(data)
+        # Use compresslevel=1 for fastest compression (speed over compression ratio)
+        compressed = gzip.compress(data, compresslevel=1)
         extension = ".gz"
       elif algorithm == "bzip2":
-        compressed = bz2.compress(data)
+        # Use compresslevel=1 for fastest bzip2 compression
+        compressed = bz2.compress(data, compresslevel=1)
         extension = ".bz2"
       elif algorithm == "lzma":
-        compressed = lzma.compress(data)
+        # Use preset=0 for fastest LZMA compression
+        compressed = lzma.compress(data, preset=0)
         extension = ".xz"
       
       compress_time = time.time() - start_time

@@ -192,12 +192,12 @@ export class BulletproofP2P {
   private lastPingTime = 0
   private connectionLatency = 0
 
-  // High-throughput flow control (adaptive)
-  private DESIRED_CHUNK_SIZE = 256 * 1024 // desktop target
-  private MIN_CHUNK_SIZE = 8 * 1024 // smaller floor for mobile safety
-  private chunkSize = 64 * 1024 // set after DC opens
-  private MAX_BUFFERED_AMOUNT = 8 * 1024 * 1024
-  private BUFFERED_AMOUNT_LOW_THRESHOLD = 1 * 1024 * 1024
+  // High-throughput flow control (adaptive) - Optimized for 200MB files
+  private DESIRED_CHUNK_SIZE = 512 * 1024 // Increased for faster transfer of larger files
+  private MIN_CHUNK_SIZE = 16 * 1024 // Increased minimum for better performance
+  private chunkSize = 128 * 1024 // Increased initial chunk size
+  private MAX_BUFFERED_AMOUNT = 16 * 1024 * 1024 // Increased buffer for 200MB files
+  private BUFFERED_AMOUNT_LOW_THRESHOLD = 2 * 1024 * 1024 // Increased threshold
   private PROGRESS_UPDATE_INTERVAL = 120
   private goodStreak = 0
 

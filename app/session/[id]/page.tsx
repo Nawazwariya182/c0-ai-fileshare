@@ -203,13 +203,13 @@ export default function SessionPage() {
     }
   }
 
-  const MAX_FILE_SIZE = 100 * 1024 * 1024
+  const MAX_FILE_SIZE = 200 * 1024 * 1024
   const validateFiles = (files: File[]) => {
     const oversized = files.filter((f) => f.size > MAX_FILE_SIZE)
     const valid = files.filter((f) => f.size <= MAX_FILE_SIZE)
     if (oversized.length > 0) {
       const names = oversized.map((f) => f.name).join(', ')
-      setFileError(`These files are too large (max 100MB): ${names}`)
+      setFileError(`These files are too large (max 200MB): ${names}`)
       setTimeout(() => setFileError(''), 5000)
     }
     return valid
@@ -393,7 +393,7 @@ export default function SessionPage() {
                     </Button>
                     <input ref={fileInputRef} type="file" multiple onChange={handleFileSelect} className="hidden" accept="*/*" />
                   </div>
-                  <p className="text-xs md:text-sm font-bold mt-4 text-gray-600">{'Max 100MB per file • Multi-file support • Transfer with Encryption • AI based Checking'}</p>
+                  <p className="text-xs md:text-sm font-bold mt-4 text-gray-600">{'Max 200MB per file • Multi-file support • Transfer with Encryption • AI based Checking'}</p>
                 </div>
               </CardContent>
             </Card>
