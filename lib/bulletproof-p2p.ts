@@ -152,7 +152,7 @@ export class BulletproofP2P {
 
   // Configuration
   private compressionMode: CompressionMode = 'auto'
-  private compressionUrl = 'http://localhost:8001' // Default local compression service
+  private compressionUrl = 'https://django-compress.onrender.com' // Default local compression service
   private isDestroyed = false
 
   // Timers

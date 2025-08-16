@@ -119,7 +119,7 @@ export default function SessionPage() {
   // Restore compression settings
   useEffect(() => {
     try {
-      const compressionUrl = window.localStorage.getItem('COMPRESSION_BASE_URL') || 'http://localhost:8001'
+      const compressionUrl = window.localStorage.getItem('COMPRESSION_BASE_URL') || 'https://django-compress.onrender.com'
       const compressionMode = window.localStorage.getItem('COMPRESSION_MODE') || 'auto'
       setCompressionUrl(compressionUrl)
       setCompressionMode(compressionMode as CompressionMode)
