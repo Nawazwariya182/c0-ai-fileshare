@@ -36,6 +36,8 @@ export interface IncomingFileData {
 }
 
 type EncryptionAlgo = 'django-fernet' | 'aes-gcm-chunked'
+type CompressionAlgo = 'gzip' | 'bzip2' | 'lzma' | 'none'
+
 type EncAesGcmChunked = {
   algo: 'aes-gcm-chunked'
   key: string // base64 raw 256-bit key (per file)
@@ -51,12 +53,29 @@ type EncDjangoFernet = {
 }
 export type EncryptionInfo = EncAesGcmChunked | EncDjangoFernet
 
+export interface CompressionInfo {
+  algorithm: CompressionAlgo
+  originalSize: number
+  compressedSize: number
+  compressionRatio: number
+  spaceSaved: number
+}
+
+export interface FileMetadata {
+  fileName: string
+  fileSize: number
+  fileType: string
+  encryption?: EncryptionInfo
+  compression?: CompressionInfo
+}
+
 export interface FileOfferData {
   fileId: string
   fileName: string
   fileSize: number
   fileType: string
   encryption?: EncryptionInfo
+  compression?: CompressionInfo
 }
 export interface FileAcceptData {
   fileId: string
@@ -113,6 +132,7 @@ export type Timer = ReturnType<typeof setTimeout>
 export type Interval = ReturnType<typeof setInterval>
 
 type EncryptionMode = 'local' | 'django' | 'none'
+export type CompressionMode = 'auto' | 'always' | 'never'
 
 export class BulletproofP2P {
   private sessionId: string
@@ -129,6 +149,10 @@ export class BulletproofP2P {
   private connectionQuality: ConnectionQuality = 'excellent'
   private currentSpeed = 0
   private userCount = 0
+
+  // Configuration
+  private compressionMode: CompressionMode = 'auto'
+  private compressionUrl = 'http://localhost:8001' // Default local compression service
   private isDestroyed = false
 
   // Timers
@@ -144,6 +168,7 @@ export class BulletproofP2P {
 
   // Encryption state
   private incomingEncryption = new Map<string, EncryptionInfo>()
+  private incomingCompression = new Map<string, CompressionInfo>()
   private incomingLocalKeys = new Map<string, CryptoKey>() // fileId -> CryptoKey (AES)
   private outgoingLocalAes = new Map<string, { key: CryptoKey; baseIv: Uint8Array; keyB64: string; ivB64: string }>()
   private encryptionMode: EncryptionMode = 'local'
@@ -218,6 +243,24 @@ export class BulletproofP2P {
     console.log(`🚀 BulletproofP2P for session ${sessionId} (user ${userId}) mode=${this.encryptionMode}`)
   }
 
+  // Configuration methods
+  public setCompressionMode(mode: CompressionMode): void {
+    this.compressionMode = mode
+    console.log(`📦 Compression mode set to: ${mode}`)
+  }
+
+  public setCompressionUrl(url: string): void {
+    this.compressionUrl = url
+    console.log(`📦 Compression service URL set to: ${url}`)
+  }
+
+  public getCompressionConfig(): { mode: CompressionMode; url: string } {
+    return {
+      mode: this.compressionMode,
+      url: this.compressionUrl
+    }
+  }
+
   async initialize(): Promise<void> {
     this.isDestroyed = false
     await this.connectToSignaling()
@@ -284,6 +327,122 @@ export class BulletproofP2P {
       return key
     } finally { clearTimeout(to) }
   }
+
+  // Compression methods
+  private async compressFile(file: File): Promise<{ blob: Blob; algorithm: string; stats: any } | null> {
+    try {
+      const base = this.compressionUrl.replace(/\/$/, '')
+      
+      // Check if compression service is available
+      const healthRes = await fetch(`${base}/health/`, { method: 'GET' }).catch(() => null)
+      if (!healthRes?.ok) {
+        console.log('Compression service not available, sending uncompressed')
+        return null
+      }
+
+      // Check if file is likely already compressed
+      const extension = file.name.split('.').pop()?.toLowerCase() || ''
+      const compressedExtensions = ['zip', 'rar', '7z', 'gz', 'bz2', 'xz', 'jpg', 'jpeg', 'png', 'gif', 'mp3', 'mp4', 'avi', 'mkv', 'pdf']
+      if (compressedExtensions.includes(extension)) {
+        console.log(`File ${file.name} appears to be already compressed, skipping compression`)
+        return null
+      }
+
+      // Choose algorithm based on file size and type
+      let algorithm = 'gzip' // default
+      if (file.size > 100 * 1024 * 1024) { // > 100MB
+        algorithm = 'lzma' // best compression for large files
+      } else if (file.size > 10 * 1024 * 1024) { // > 10MB
+        algorithm = 'bzip2' // balanced
+      }
+
+      const fd = new FormData()
+      fd.append('file', file, file.name)
+      fd.append('algorithm', algorithm)
+
+      const ctrl = new AbortController()
+      const timeout = Math.max(60000, Math.min(300000, file.size / 10000)) // 1-5 minutes based on file size
+      const to = setTimeout(() => ctrl.abort('timeout'), timeout)
+      
+      try {
+        const res = await fetch(`${base}/api/compress/`, { 
+          method: 'POST', 
+          body: fd, 
+          signal: ctrl.signal as any 
+        })
+        
+        if (!res.ok) {
+          console.warn(`Compression failed ${res.status}, sending uncompressed`)
+          return null
+        }
+
+        const blob = await res.blob()
+        
+        // Get compression stats from headers
+        const stats = {
+          algorithm: res.headers.get('X-Algorithm') || algorithm,
+          originalSize: parseInt(res.headers.get('X-Original-Size') || '0'),
+          compressedSize: parseInt(res.headers.get('X-Compressed-Size') || '0'),
+          compressionRatio: parseFloat(res.headers.get('X-Compression-Ratio') || '0'),
+          spaceSaved: parseFloat(res.headers.get('X-Space-Saved') || '0'),
+          compressionTime: parseFloat(res.headers.get('X-Compression-Time') || '0')
+        }
+
+        // Only use compressed version if we saved significant space (>10%)
+        if (stats.spaceSaved > 10) {
+          console.log(`Compressed ${file.name}: ${stats.originalSize} -> ${stats.compressedSize} bytes (${stats.spaceSaved}% saved)`)
+          return { blob, algorithm, stats }
+        } else {
+          console.log(`Compression not beneficial for ${file.name} (${stats.spaceSaved}% saved), sending uncompressed`)
+          return null
+        }
+      } finally { 
+        clearTimeout(to) 
+      }
+    } catch (e) {
+      console.warn('Compression failed, sending uncompressed:', e)
+      return null
+    }
+  }
+
+  private async decompressFile(blob: Blob, algorithm?: string): Promise<Blob | null> {
+    try {
+      const base = this.compressionUrl.replace(/\/$/, '')
+      
+      const fd = new FormData()
+      fd.append('file', blob, `compressed.${algorithm || 'bin'}`)
+      if (algorithm) {
+        fd.append('algorithm', algorithm)
+      }
+
+      const ctrl = new AbortController()
+      const timeout = Math.max(60000, Math.min(300000, blob.size / 10000))
+      const to = setTimeout(() => ctrl.abort('timeout'), timeout)
+      
+      try {
+        const res = await fetch(`${base}/api/decompress/`, { 
+          method: 'POST', 
+          body: fd, 
+          signal: ctrl.signal as any 
+        })
+        
+        if (!res.ok) {
+          console.warn(`Decompression failed ${res.status}`)
+          return null
+        }
+
+        const decompressed = await res.blob()
+        console.log(`Decompressed file: ${blob.size} -> ${decompressed.size} bytes`)
+        return decompressed
+      } finally { 
+        clearTimeout(to) 
+      }
+    } catch (e) {
+      console.warn('Decompression failed:', e)
+      return null
+    }
+  }
+
   private async encryptViaDjango(file: File): Promise<{ blob: Blob; key: string } | null> {
     try {
       const base = this.getDjangoBaseUrl().replace(/\/$/, '')
@@ -378,7 +537,27 @@ export class BulletproofP2P {
     for (const original of files) {
       let fileToSend = original
       let encInfo: EncryptionInfo | undefined
+      let compInfo: CompressionInfo | undefined
 
+      // Step 1: Compression (if enabled and beneficial)
+      if (this.compressionMode === 'always' || this.compressionMode === 'auto') {
+        const compressed = await this.compressFile(original)
+        if (compressed) {
+          fileToSend = new File([compressed.blob], `${original.name}.${compressed.algorithm}`, { 
+            type: 'application/octet-stream' 
+          })
+          compInfo = {
+            algorithm: compressed.algorithm as CompressionAlgo,
+            originalSize: compressed.stats.originalSize,
+            compressedSize: compressed.stats.compressedSize,
+            compressionRatio: compressed.stats.compressionRatio,
+            spaceSaved: compressed.stats.spaceSaved
+          }
+          console.log(`📦 Compressed ${original.name}: ${compInfo.spaceSaved}% space saved`)
+        }
+      }
+
+      // Step 2: Encryption (if enabled)
       if (this.encryptionMode === 'local' && crypto?.subtle) {
         const { key, rawB64 } = await this.generateAesKey()
         const baseIv = this.makeBaseIv()
@@ -387,15 +566,22 @@ export class BulletproofP2P {
         this.outgoingLocalAes.set(fileId, { key, baseIv, keyB64: rawB64, ivB64 })
         encInfo = { algo: 'aes-gcm-chunked', key: rawB64, iv: ivB64, originalName: original.name, tagLength: 128 }
         this.registerSenderTransfer(fileId, original, encInfo)
-        this.sendFileOffer(fileId, { fileName: original.name, fileSize: original.size, fileType: original.type, encryption: encInfo })
+        this.sendFileOffer(fileId, { 
+          fileName: original.name, 
+          fileSize: original.size, 
+          fileType: original.type, 
+          encryption: encInfo,
+          compression: compInfo 
+        })
         continue
       }
 
       if (this.encryptionMode === 'django') {
-        const enc = await this.encryptViaDjango(original)
+        const enc = await this.encryptViaDjango(fileToSend) // Encrypt the possibly compressed file
         if (enc) {
-          fileToSend = new File([enc.blob], `${original.name}.enc`, { type: 'application/octet-stream' })
+          fileToSend = new File([enc.blob], `${fileToSend.name}.enc`, { type: 'application/octet-stream' })
           encInfo = { algo: 'django-fernet', key: enc.key, originalName: original.name }
+          console.log(`🔒 Encrypted ${original.name}${compInfo ? ' (after compression)' : ''}`)
         }
       }
 
@@ -415,7 +601,7 @@ export class BulletproofP2P {
       }
       this.fileTransfers.set(fileId, transfer)
       this.updateFileTransfers()
-      this.sendFileOffer(fileId, { fileName: fileToSend.name, fileSize: fileToSend.size, fileType: fileToSend.type, encryption: encInfo })
+      this.sendFileOffer(fileId, { fileName: fileToSend.name, fileSize: fileToSend.size, fileType: fileToSend.type, encryption: encInfo, compression: compInfo })
     }
   }
 
@@ -752,12 +938,12 @@ export class BulletproofP2P {
   }
 
   // Offers
-  private sendFileOffer(fileId: string, meta: { fileName: string; fileSize: number; fileType: string; encryption?: EncryptionInfo }) {
+  private sendFileOffer(fileId: string, meta: { fileName: string; fileSize: number; fileType: string; encryption?: EncryptionInfo; compression?: CompressionInfo }) {
     this.offersWaiting.add(fileId)
     const send = () => {
       this.sendP2P({
         type: 'file-offer',
-        data: { fileId, fileName: meta.fileName, fileSize: meta.fileSize, fileType: meta.fileType, encryption: meta.encryption } as FileOfferData,
+        data: { fileId, fileName: meta.fileName, fileSize: meta.fileSize, fileType: meta.fileType, encryption: meta.encryption, compression: meta.compression } as FileOfferData,
         timestamp: Date.now(),
         id: this.id(),
       })
@@ -805,6 +991,10 @@ export class BulletproofP2P {
   private handleFileOffer(data: FileOfferData): void {
     if (data.encryption?.algo === 'django-fernet' || data.encryption?.algo === 'aes-gcm-chunked') {
       this.incomingEncryption.set(data.fileId, data.encryption)
+    }
+    if (data.compression) {
+      this.incomingCompression.set(data.fileId, data.compression)
+      console.log(`📦 File ${data.fileName} was compressed with ${data.compression.algorithm} (${data.compression.spaceSaved}% saved)`)
     }
     // Initialize receiver state now (so mobile can start building UI fast)
     if (!this.incomingFiles.has(data.fileId)) {
@@ -1143,13 +1333,38 @@ export class BulletproofP2P {
       let blob = new Blob(parts, { type: inc.fileType || 'application/octet-stream' })
       let downloadName = inc.fileName
 
+      // Step 1: Decrypt if needed
       const enc = this.incomingEncryption.get(fileId)
       if (enc?.algo === 'django-fernet') {
         const dec = await this.decryptViaDjango(blob, (enc as EncDjangoFernet).key)
-        if (dec) { blob = dec; downloadName = enc.originalName }
-        else { this.onError?.('Decryption failed - providing encrypted file instead') }
+        if (dec) { 
+          blob = dec
+          downloadName = enc.originalName
+          console.log(`🔓 Decrypted ${downloadName}`)
+        } else { 
+          this.onError?.('Decryption failed - providing encrypted file instead') 
+        }
       } else if (enc?.algo === 'aes-gcm-chunked') {
         downloadName = (enc as EncAesGcmChunked).originalName || downloadName
+      }
+
+      // Step 2: Decompress if needed
+      const comp = this.incomingCompression.get(fileId)
+      if (comp) {
+        console.log(`📦 Decompressing ${downloadName} (${comp.algorithm})...`)
+        const decompressed = await this.decompressFile(blob, comp.algorithm)
+        if (decompressed) {
+          blob = decompressed
+          // Remove compression extension from filename
+          const extensions = { gzip: '.gz', bzip2: '.bz2', lzma: '.xz' }
+          const ext = extensions[comp.algorithm as keyof typeof extensions]
+          if (downloadName.endsWith(ext)) {
+            downloadName = downloadName.slice(0, -ext.length)
+          }
+          console.log(`🎉 Decompressed ${downloadName}: ${comp.compressedSize} -> ${blob.size} bytes`)
+        } else {
+          console.warn('Decompression failed, providing compressed file')
+        }
       }
 
       const url = URL.createObjectURL(blob)
@@ -1178,6 +1393,7 @@ export class BulletproofP2P {
 
       this.incomingFiles.delete(fileId)
       this.incomingEncryption.delete(fileId)
+      this.incomingCompression.delete(fileId)
       this.incomingLocalKeys.delete(fileId)
       this.activeTransfers.delete(fileId)
 

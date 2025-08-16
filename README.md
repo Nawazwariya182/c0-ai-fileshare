@@ -1,6 +1,15 @@
 # P2P File Sharing Application
 
-A secure, real-time peer-to-peer file sharing web application built with Next.js 14, WebRTC, and WebSocket signaling. Features Neubrutalism UI design and Clerk authentication.
+A secure, real-time peer-to-peer file sharing web application built with Next.js 14, WebRTC, and WebSocket signaling. Features Neubrutalism UI design, Clerk authentication, and optional file compression for bandwidth optimization.
+
+## ✨ Key Features
+
+- 🔒 **Secure P2P Transfer**: Direct peer-to-peer file sharing with WebRTC
+- 🗜️ **Smart Compression**: Optional file compression to reduce bandwidth usage
+- 🚀 **Real-time Communication**: Instant messaging and file progress tracking
+- 👤 **User Authentication**: Secure login/signup with Clerk
+- 📱 **Responsive Design**: Works on desktop and mobile devices
+- 🎨 **Neubrutalism UI**: Modern, bold design aesthetic
 
 ## 🚨 Quick Fix for WebSocket Issues
 
@@ -20,7 +29,18 @@ npm run dev:signaling
 npm run dev:next
 \`\`\`
 
-### 3. Or Start Both Together
+### 3. Start with Compression (Optional)
+\`\`\`bash
+# Start all services including compression
+npm run dev:full
+
+# Or start compression separately
+python scripts/django-compressor.py
+# Windows: start-compressor.bat
+# Unix/Linux: ./start-compressor.sh
+\`\`\`
+
+### 4. Or Start Both Together
 \`\`\`bash
 npm run dev
 \`\`\`

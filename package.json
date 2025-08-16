@@ -4,8 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "concurrently --kill-others \"npm run dev:signaling\" \"npm run dev:next\"",
+    "dev:full": "concurrently --kill-others \"npm run dev:signaling\" \"npm run dev:next\" \"npm run dev:compression\"",
     "dev:next": "next dev",
     "dev:signaling": "tsx signaling-server/index.ts",
+    "dev:compression": "python scripts/django-compressor.py",
     "build": "next build",
     "start": "next start",
     "start:signaling": "NODE_ENV=production tsx signaling-server/index.ts",
@@ -15,6 +17,7 @@
     "lint": "echo 'ESLint disabled'",
     "signaling": "tsx signaling-server/index.ts",
     "test-connection": "tsx scripts/test-connection.ts",
+    "test-compression": "python scripts/test-compression.py",
     "check-server": "tsx scripts/check-server.ts",
     "setup": "npm install",
     "kill-port": "npx kill-port 8080",

@@ -8,7 +8,7 @@ import { Upload, Download, Users, Wifi, WifiOff, FileText, AlertTriangle, CheckC
 import { useUser } from '@/hooks/useUser'
 import { FilePreviewModal } from '@/components/file-preview-modal'
 import { ChatPanel } from '@/components/chat-panel'
-import { BulletproofP2P } from '@/lib/bulletproof-p2p'
+import { BulletproofP2P, CompressionMode } from '@/lib/bulletproof-p2p'
 
 interface FileTransfer {
   id: string
@@ -83,6 +83,8 @@ export default function SessionPage() {
   const [userCount, setUserCount] = useState(0)
   const [isMobile, setIsMobile] = useState(false)
   const [encryptionUrl, setEncryptionUrl] = useState<string>('')
+  const [compressionUrl, setCompressionUrl] = useState<string>('')
+  const [compressionMode, setCompressionMode] = useState<CompressionMode>('auto')
   const [dragOver, setDragOver] = useState(false)
   const [previewFiles, setPreviewFiles] = useState<File[]>([])
   const [showPreview, setShowPreview] = useState(false)
@@ -114,6 +116,16 @@ export default function SessionPage() {
     } catch {}
   }, [])
 
+  // Restore compression settings
+  useEffect(() => {
+    try {
+      const compressionUrl = window.localStorage.getItem('COMPRESSION_BASE_URL') || 'http://localhost:8001'
+      const compressionMode = window.localStorage.getItem('COMPRESSION_MODE') || 'auto'
+      setCompressionUrl(compressionUrl)
+      setCompressionMode(compressionMode as CompressionMode)
+    } catch {}
+  }, [])
+
   // Initialize P2P
   useEffect(() => {
     if (!sessionValid) {
@@ -128,6 +140,12 @@ export default function SessionPage() {
 
     const p2p = new BulletproofP2P(safeSessionId, uid)
     p2pRef.current = p2p
+
+    // Configure compression
+    if (compressionUrl) {
+      p2p.setCompressionUrl(compressionUrl)
+    }
+    p2p.setCompressionMode(compressionMode)
 
     p2p.onConnectionStatusChange = (status) => {
       setConnectionStatus(['connected', 'reconnecting', 'connecting'].includes(status) ? status : 'connecting')
@@ -163,7 +181,7 @@ export default function SessionPage() {
       document.removeEventListener('visibilitychange', onVis)
       p2p.destroy()
     }
-  }, [safeSessionId, sessionValid, uid])
+  }, [safeSessionId, sessionValid, uid, compressionUrl, compressionMode])
 
   const handleSetEncryptionServer = () => {
     const current = (typeof window !== 'undefined' && window.localStorage.getItem('DJANGO_BASE_URL')) || ''
