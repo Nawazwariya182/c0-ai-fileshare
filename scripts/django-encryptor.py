@@ -34,9 +34,9 @@ if not settings.configured:
     ],
     DEFAULT_CHARSET="utf-8",
     STATIC_URL="/static/",
-    USE_TZ=True,
-    FILE_UPLOAD_MAX_MEMORY_SIZE=100 * 1024 * 1024,
-    DATA_UPLOAD_MAX_MEMORY_SIZE=100 * 1024 * 1024,
+  USE_TZ=True,
+  FILE_UPLOAD_MAX_MEMORY_SIZE=300 * 1024 * 1024,
+  DATA_UPLOAD_MAX_MEMORY_SIZE=300 * 1024 * 1024,
   )
 
 from django.core.management import execute_from_command_line
@@ -114,9 +114,9 @@ def api_encrypt(request: HttpRequest) -> HttpResponse:
     except Exception:
       return add_cors_headers(JsonResponse({"error": "Invalid encryption key format"}, status=400))
 
-    max_size = 100 * 1024 * 1024
+    max_size = 300 * 1024 * 1024
     if uploaded.size > max_size:
-      return add_cors_headers(JsonResponse({"error": "File too large (max: 100MB)"}, status=400))
+      return add_cors_headers(JsonResponse({"error": "File too large (max: 300MB)"}, status=400))
 
     data = uploaded.read()
     try:
@@ -152,9 +152,9 @@ def api_decrypt(request: HttpRequest) -> HttpResponse:
     except Exception:
       return add_cors_headers(JsonResponse({"error": "Invalid decryption key format"}, status=400))
 
-    max_size = 100 * 1024 * 1024
+    max_size = 300 * 1024 * 1024
     if uploaded.size > max_size:
-      return add_cors_headers(JsonResponse({"error": "File too large (max: 100MB)"}, status=400))
+      return add_cors_headers(JsonResponse({"error": "File too large (max: 300MB)"}, status=400))
 
     enc = uploaded.read()
     try:

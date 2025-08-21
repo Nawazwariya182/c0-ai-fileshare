@@ -111,9 +111,9 @@ def api_compress(request: HttpRequest) -> HttpResponse:
     if algorithm not in ["gzip", "bzip2", "lzma"]:
       return add_cors_headers(JsonResponse({"error": "Invalid algorithm. Use: gzip, bzip2, lzma"}, status=400))
 
-    max_size = 200 * 1024 * 1024
+    max_size = 300 * 1024 * 1024
     if uploaded.size > max_size:
-      return add_cors_headers(JsonResponse({"error": "File too large (max: 200MB)"}, status=400))
+      return add_cors_headers(JsonResponse({"error": "File too large (max: 300MB)"}, status=400))
 
     data = uploaded.read()
     original_size = len(data)
@@ -169,9 +169,9 @@ def api_decompress(request: HttpRequest) -> HttpResponse:
     if not uploaded:
       return add_cors_headers(JsonResponse({"error": "No file provided"}, status=400))
 
-    max_size = 100 * 1024 * 1024
+    max_size = 300 * 1024 * 1024
     if uploaded.size > max_size:
-      return add_cors_headers(JsonResponse({"error": "File too large (max: 100MB)"}, status=400))
+      return add_cors_headers(JsonResponse({"error": "File too large (max: 300MB)"}, status=400))
 
     compressed_data = uploaded.read()
     start_time = time.time()
